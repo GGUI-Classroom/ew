@@ -16,10 +16,6 @@ import { loadState, saveState } from './storage.js';
 const token = process.env.DISCORD_TOKEN;
 const port = Number(process.env.PORT || 0);
 
-if (!token) {
-  throw new Error('DISCORD_TOKEN is required to start the bot.');
-}
-
 const state = await loadState();
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.DirectMessages, GatewayIntentBits.MessageContent],
@@ -328,4 +324,21 @@ if (port > 0) {
   });
 }
 
-await client.login(token);
+async function startBot() {
+  console.log('Starting Discord bot process...');
+
+  if (!token) {
+    console.error('Startup error: DISCORD_TOKEN is missing. Set it in Render environment variables.');
+    process.exit(1);
+  }
+
+  try {
+    await client.login(token);
+  } catch (error) {
+    console.error('Discord login failed. Common causes: invalid token, token reset in developer portal, or malformed env value.');
+    console.error(error);
+    process.exit(1);
+  }
+}
+
+await startBot();

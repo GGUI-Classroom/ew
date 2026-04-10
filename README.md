@@ -81,6 +81,13 @@ The bot process still runs in the same service.
 
 Important: free web services may sleep or be restricted depending on current Render plan rules, so uptime is not guaranteed.
 
+If Render still fails, open deploy logs and look for one of these startup messages:
+
+- Startup error: DISCORD_TOKEN is missing
+- Discord login failed
+
+Those indicate environment variable or token issues, not code build issues.
+
 ## discord.js vs discord.py
 
 You only need one library, not both.
