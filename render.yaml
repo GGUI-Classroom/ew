@@ -1,12 +1,15 @@
 services:
-  - type: worker
+  - type: web
     name: discord-relay-bot
     env: node
     plan: free
     buildCommand: npm ci
     startCommand: npm run deploy && npm start
+    healthCheckPath: /health
     autoDeploy: true
     envVars:
+      - key: PORT
+        value: "10000"
       - key: DISCORD_TOKEN
         sync: false
       - key: CLIENT_ID

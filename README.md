@@ -71,7 +71,10 @@ This repo includes a Render Blueprint file at `render.yaml`.
    - `RELAY_CHANNEL_ID` (optional)
 5. Deploy.
 
-The blueprint creates a background worker (not a web service), which is what a Discord bot needs.
+The blueprint uses a web service fallback with a `/health` endpoint, because some Render free plans do not allow background workers.
+The bot process still runs in the same service.
+
+Important: free web services may sleep or be restricted depending on current Render plan rules, so uptime is not guaranteed.
 
 ## discord.js vs discord.py
 

@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import http from 'node:http';
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -13,6 +14,7 @@ import { commandData } from './commands.js';
 import { loadState, saveState } from './storage.js';
 
 const token = process.env.DISCORD_TOKEN;
+const port = Number(process.env.PORT || 0);
 
 if (!token) {
   throw new Error('DISCORD_TOKEN is required to start the bot.');
@@ -308,5 +310,22 @@ client.once(Events.ClientReady, (readyClient) => {
   console.log(`Loaded ${commandData.length} slash commands.`);
   console.log(`Active relay sessions: ${Object.keys(state.activeRelays).length}`);
 });
+
+if (port > 0) {
+  const healthServer = http.createServer((req, res) => {
+    if (req.url === '/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('discord-relay-bot running');
+  });
+
+  healthServer.listen(port, () => {
+    console.log(`Health server listening on port ${port}`);
+  });
+}
 
 await client.login(token);
