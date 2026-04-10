@@ -7,7 +7,8 @@ const clientId = process.env.CLIENT_ID;
 const guildId = process.env.GUILD_ID;
 
 if (!token || !clientId) {
-  throw new Error('DISCORD_TOKEN and CLIENT_ID must be set before deploying commands.');
+  console.log('Skipping slash command deploy because DISCORD_TOKEN or CLIENT_ID is missing.');
+  process.exit(0);
 }
 
 const rest = new REST({ version: '10' }).setToken(token);

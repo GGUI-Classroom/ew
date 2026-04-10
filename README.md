@@ -71,6 +71,11 @@ This repo includes a Render Blueprint file at `render.yaml`.
    - `RELAY_CHANNEL_ID` (optional)
 5. Deploy.
 
+After the service is healthy, run slash command registration once:
+
+- in a local clone: `npm run deploy`
+- or in a Render shell for the service: `npm run deploy`
+
 The blueprint uses a web service fallback with a `/health` endpoint, because some Render free plans do not allow background workers.
 The bot process still runs in the same service.
 
