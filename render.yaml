@@ -1,0 +1,17 @@
+services:
+  - type: worker
+    name: discord-relay-bot
+    env: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm run deploy && npm start
+    autoDeploy: true
+    envVars:
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: CLIENT_ID
+        sync: false
+      - key: GUILD_ID
+        sync: false
+      - key: RELAY_CHANNEL_ID
+        sync: false
