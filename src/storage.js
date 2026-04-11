@@ -6,6 +6,7 @@ const stateFile = path.join(dataDirectory, 'state.json');
 const defaultState = {
   activeRelays: {},
   bannedUsers: [],
+  warnings: {},
 };
 
 export async function loadState() {
@@ -19,6 +20,7 @@ export async function loadState() {
       ...parsedState,
       activeRelays: parsedState.activeRelays ?? {},
       bannedUsers: parsedState.bannedUsers ?? [],
+      warnings: parsedState.warnings ?? {},
     };
   } catch (error) {
     if (error?.code !== 'ENOENT') {
