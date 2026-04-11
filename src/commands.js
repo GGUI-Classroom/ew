@@ -8,19 +8,8 @@ export const commandDefinitions = [
     .setName('about')
     .setDescription('Show what this bot can do.'),
   new SlashCommandBuilder()
-    .setName('setrelaychannel')
-    .setDescription('Set the text channel used for forwarded relay messages.')
-    .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageGuild)
-    .addChannelOption((option) =>
-      option
-        .setName('channel')
-        .setDescription('The channel that receives forwarded DM relay messages.')
-        .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
-        .setRequired(true),
-    ),
-  new SlashCommandBuilder()
     .setName('relayrequest')
-    .setDescription('Send a consent-based DM relay invitation to a user.')
+    .setDescription('Send a consent-based DM relay invitation to create a temporary channel.')
     .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageMessages)
     .addUserOption((option) =>
       option
@@ -37,13 +26,30 @@ export const commandDefinitions = [
     ),
   new SlashCommandBuilder()
     .setName('relayend')
-    .setDescription('End an active relay session.')
+    .setDescription('End an active relay session and delete the channel.')
     .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageMessages)
     .addUserOption((option) =>
       option
         .setName('user')
         .setDescription('The user whose relay should be ended.')
         .setRequired(false),
+    ),
+  new SlashCommandBuilder()
+    .setName('ban')
+    .setDescription('Ban a user from the server.')
+    .setDefaultMemberPermissions(PermissionsBitField.Flags.BanMembers)
+    .addUserOption((option) =>
+      option
+        .setName('user')
+        .setDescription('The user to ban.')
+        .setRequired(true),
+    )
+    .addStringOption((option) =>
+      option
+        .setName('reason')
+        .setDescription('Reason for the ban.')
+        .setRequired(false)
+        .setMaxLength(512),
     ),
 ];
 

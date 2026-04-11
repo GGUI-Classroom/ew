@@ -4,10 +4,12 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ChannelType,
   Client,
   EmbedBuilder,
   Events,
   GatewayIntentBits,
+  PermissionsBitField,
   Partials,
 } from 'discord.js';
 import { commandData } from './commands.js';
@@ -15,6 +17,7 @@ import { loadState, saveState } from './storage.js';
 
 const token = process.env.DISCORD_TOKEN;
 const port = Number(process.env.PORT || 0);
+const RELAY_ROLE_ID = '1492370989399543808';
 
 const state = await loadState();
 const client = new Client({
@@ -34,29 +37,41 @@ function truncate(text, limit) {
   return `${text.slice(0, limit - 3)}...`;
 }
 
-function getConfiguredRelayChannelId() {
-  return state.relayChannelId ?? process.env.RELAY_CHANNEL_ID ?? null;
+async function createRelayChannel(guild, targetUser, invoker) {
+  const channelName = `relay-${targetUser.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 32);
+
+  const channel = await guild.channels.create({
+    name: channelName,
+    type: ChannelType.GuildText,
+    topic: `Private relay for ${targetUser.tag} (invited by ${invoker.tag})`,
+    permissionOverwrites: [
+      {
+        id: guild.id,
+        deny: [PermissionsBitField.Flags.ViewChannel],
+      },
+      {
+        id: RELAY_ROLE_ID,
+        allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory],
+      },
+      {
+        id: targetUser.id,
+        allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory],
+      },
+    ],
+  });
+
+  return channel;
 }
 
-async function getRelayChannel() {
-  const channelId = getConfiguredRelayChannelId();
-  if (!channelId) {
-    return null;
-  }
-
-  const channel = await client.channels.fetch(channelId).catch(() => null);
-  return channel && channel.isTextBased() ? channel : null;
-}
-
-function buildRelayInviteEmbed(targetUser, invoker, note, relayChannel) {
+function buildRelayInviteEmbed(targetUser, invoker, note) {
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
     .setTitle('Relay request')
     .setDescription(
       [
-        `**${invoker.tag}** asked to start a consent-based relay into **${relayChannel}**.`,
-        'If you accept, your future DM messages in this conversation will be forwarded into that channel.',
-        'You can decline or stop the relay later with the button or the `/relayend` command.',
+        `**${invoker.tag}** invited you to a private relay channel in their server.`,
+        'If you accept, a temporary channel will be created where you can chat with the server moderators.',
+        'You can leave or decline anytime.',
       ].join('\n\n'),
     )
     .setThumbnail(targetUser.displayAvatarURL())
@@ -69,14 +84,28 @@ function buildRelayInviteEmbed(targetUser, invoker, note, relayChannel) {
   return embed;
 }
 
-async function notifyRelayChannelAboutStart(relayChannel, targetUser, startedBy, note) {
+async function startRelay(guild, targetUser, invoker, note) {
+  if (state.activeRelays[targetUser.id]) {
+    return null;
+  }
+
+  const channel = await createRelayChannel(guild, targetUser, invoker);
+
+  state.activeRelays[targetUser.id] = {
+    channelId: channel.id,
+    guildId: guild.id,
+    startedBy: invoker.id,
+    startedAt: new Date().toISOString(),
+  };
+  await saveState(state);
+
   const embed = new EmbedBuilder()
     .setColor(0x57f287)
     .setTitle('Relay started')
-    .setDescription(`**${targetUser.tag}** accepted the relay and their DM replies will now appear here.`)
+    .setDescription(`Relay channel created for **${targetUser.tag}**.`)
     .addFields(
-      { name: 'User ID', value: targetUser.id, inline: true },
-      { name: 'Started by', value: startedBy.tag, inline: true },
+      { name: 'User', value: targetUser.tag, inline: true },
+      { name: 'Started by', value: invoker.tag, inline: true },
     )
     .setTimestamp(new Date());
 
@@ -84,24 +113,29 @@ async function notifyRelayChannelAboutStart(relayChannel, targetUser, startedBy,
     embed.addFields({ name: 'Note', value: truncate(note, 1024) });
   }
 
-  await relayChannel.send({ embeds: [embed] });
-}
+  await channel.send({ embeds: [embed] });
 
-async function notifyRelayChannelAboutEnd(relayChannel, targetUser, endedBy) {
-  const embed = new EmbedBuilder()
-    .setColor(0xed4245)
-    .setTitle('Relay ended')
-    .setDescription(`The relay for **${targetUser.tag}** has been stopped.`)
-    .addFields({ name: 'Ended by', value: endedBy.tag, inline: true })
-    .setTimestamp(new Date());
-
-  await relayChannel.send({ embeds: [embed] });
+  return channel;
 }
 
 async function stopRelay(userId) {
   const session = state.activeRelays[userId];
   if (!session) {
     return null;
+  }
+
+  const guild = await client.guilds.fetch(session.guildId).catch(() => null);
+  const channel = guild ? await guild.channels.fetch(session.channelId).catch(() => null) : null;
+
+  if (channel) {
+    const endEmbed = new EmbedBuilder()
+      .setColor(0xed4245)
+      .setTitle('Relay ended')
+      .setDescription('This relay has been closed.')
+      .setTimestamp(new Date());
+
+    await channel.send({ embeds: [endEmbed] }).catch(() => null);
+    await channel.delete().catch(() => null);
   }
 
   delete state.activeRelays[userId];
@@ -119,22 +153,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       if (interaction.commandName === 'about') {
         await interaction.reply({
-          content: [
-            'This bot handles moderation-friendly utilities and a consent-based DM relay.',
-            'Use `/setrelaychannel` to choose the destination channel, then `/relayrequest` to invite a user.',
-          ].join(' '),
-          ephemeral: true,
-        });
-        return;
-      }
-
-      if (interaction.commandName === 'setrelaychannel') {
-        const channel = interaction.options.getChannel('channel', true);
-        state.relayChannelId = channel.id;
-        await saveState(state);
-
-        await interaction.reply({
-          content: `Relay channel set to ${channel}.`,
+          content: 'Relay bot: create private channels to chat with users. Use `/relayrequest user:<member>` to start.',
           ephemeral: true,
         });
         return;
@@ -143,31 +162,27 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (interaction.commandName === 'relayrequest') {
         const targetUser = interaction.options.getUser('user', true);
         const note = interaction.options.getString('note');
-        const relayChannel = await getRelayChannel();
-
-        if (!relayChannel) {
-          await interaction.reply({
-            content: 'Set a relay channel first with `/setrelaychannel` or the `RELAY_CHANNEL_ID` environment variable.',
-            ephemeral: true,
-          });
-          return;
-        }
 
         if (targetUser.bot) {
           await interaction.reply({ content: 'Bots cannot join a relay.', ephemeral: true });
           return;
         }
 
+        if (state.activeRelays[targetUser.id]) {
+          await interaction.reply({ content: `A relay is already active for ${targetUser.tag}.`, ephemeral: true });
+          return;
+        }
+
         const dm = await targetUser.send({
-          embeds: [buildRelayInviteEmbed(targetUser, interaction.user, note, relayChannel.toString())],
+          embeds: [buildRelayInviteEmbed(targetUser, interaction.user, note)],
           components: [
             new ActionRowBuilder().addComponents(
               new ButtonBuilder()
-                .setCustomId(`relay_accept:${interaction.user.id}:${Date.now()}`)
+                .setCustomId(`relay_accept:${interaction.user.id}:${interaction.guildId}:${Date.now()}`)
                 .setLabel('Accept relay')
                 .setStyle(ButtonStyle.Success),
               new ButtonBuilder()
-                .setCustomId(`relay_decline:${interaction.user.id}:${Date.now()}`)
+                .setCustomId(`relay_decline`)
                 .setLabel('Decline')
                 .setStyle(ButtonStyle.Danger),
             ),
@@ -185,7 +200,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       if (interaction.commandName === 'relayend') {
         const targetUser = interaction.options.getUser('user') ?? interaction.user;
-        const relayChannel = await getRelayChannel();
         const session = await stopRelay(targetUser.id);
 
         if (!session) {
@@ -193,24 +207,41 @@ client.on(Events.InteractionCreate, async (interaction) => {
           return;
         }
 
-        await interaction.reply({ content: `Relay ended for ${targetUser.tag}.`, ephemeral: true });
+        await interaction.reply({ content: `Relay ended for ${targetUser.tag}. Channel deleted.`, ephemeral: true });
+        return;
+      }
 
-        if (relayChannel) {
-          await notifyRelayChannelAboutEnd(relayChannel, targetUser, interaction.user);
+      if (interaction.commandName === 'ban') {
+        const targetUser = interaction.options.getUser('user', true);
+        const reason = interaction.options.getString('reason') ?? 'No reason provided';
+
+        if (!interaction.guild) {
+          await interaction.reply({ content: 'This command only works in a server.', ephemeral: true });
+          return;
         }
+
+        try {
+          await interaction.guild.members.ban(targetUser, { reason });
+          state.bannedUsers.push({ id: targetUser.id, tag: targetUser.tag, bannedAt: new Date().toISOString(), reason });
+          await saveState(state);
+
+          await interaction.reply({
+            content: `**${targetUser.tag}** has been banned. Reason: ${reason}`,
+            ephemeral: false,
+          });
+
+          await stopRelay(targetUser.id);
+        } catch (error) {
+          await interaction.reply({ content: `Failed to ban ${targetUser.tag}: ${error.message}`, ephemeral: true });
+        }
+        return;
       }
     }
 
     if (interaction.isButton()) {
-      const [action, requesterId] = interaction.customId.split(':');
+      const [action, requesterId, guildId, timestamp] = interaction.customId.split(':');
 
       if (action !== 'relay_accept' && action !== 'relay_decline') {
-        return;
-      }
-
-      const relayChannel = await getRelayChannel();
-      if (!relayChannel) {
-        await interaction.reply({ content: 'Relay channel is not configured yet.', ephemeral: true });
         return;
       }
 
@@ -222,8 +253,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return;
       }
 
-      const existingSession = state.activeRelays[interaction.user.id];
-      if (existingSession) {
+      const guild = await client.guilds.fetch(guildId).catch(() => null);
+      if (!guild) {
+        await interaction.reply({ content: 'Guild not found.', ephemeral: true });
+        return;
+      }
+
+      const invoker = await client.users.fetch(requesterId).catch(() => null);
+      const channel = await startRelay(guild, interaction.user, invoker ?? { tag: 'Unknown' }, null);
+
+      if (!channel) {
         await interaction.update({
           content: 'A relay session is already active for you.',
           components: [],
@@ -231,21 +270,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return;
       }
 
-      const startedBy = await client.users.fetch(requesterId).catch(() => null);
-      state.activeRelays[interaction.user.id] = {
-        relayChannelId: relayChannel.id,
-        startedBy: startedBy?.id ?? requesterId,
-        startedAt: new Date().toISOString(),
-        note: null,
-      };
-      await saveState(state);
-
       await interaction.update({
-        content: 'You accepted the relay. Your DM replies will now be forwarded.',
+        content: `Relay accepted. Channel created in **${guild.name}**.`,
         components: [],
       });
-
-      await notifyRelayChannelAboutStart(relayChannel, interaction.user, startedBy ?? interaction.user, null);
     }
   } catch (error) {
     console.error('Interaction handling failed:', error);
@@ -263,39 +291,43 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 client.on(Events.MessageCreate, async (message) => {
   try {
-    if (message.author.bot || message.guild) {
+    if (message.author.bot) {
       return;
     }
 
-    const session = state.activeRelays[message.author.id];
-    if (!session) {
+    const userRelaySession = state.activeRelays[message.author.id];
+
+    if (message.guild && userRelaySession && userRelaySession.channelId === message.channelId) {
+      const dmUser = await client.users.fetch(message.author.id).catch(() => null);
+      if (!dmUser) {
+        return;
+      }
+
+      const embed = new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setAuthor({ name: `Message from server relay`, iconURL: message.author.displayAvatarURL() })
+        .setDescription(truncate(message.content?.trim() || '*No text content*', 4096))
+        .setTimestamp(new Date());
+
+      await dmUser.send({ embeds: [embed] }).catch(() => null);
       return;
     }
 
-    const relayChannel = await client.channels.fetch(session.relayChannelId).catch(() => null);
-    if (!relayChannel || !relayChannel.isTextBased()) {
+    if (!message.guild && userRelaySession) {
+      const guild = await client.guilds.fetch(userRelaySession.guildId).catch(() => null);
+      const channel = guild ? await guild.channels.fetch(userRelaySession.channelId).catch(() => null) : null;
+
+      if (channel && channel.isTextBased()) {
+        const embed = new EmbedBuilder()
+          .setColor(0x2b2d31)
+          .setAuthor({ name: `${message.author.tag} (DM)`, iconURL: message.author.displayAvatarURL() })
+          .setDescription(truncate(message.content?.trim() || '*No text content*', 4096))
+          .setTimestamp(new Date());
+
+        await channel.send({ embeds: [embed] }).catch(() => null);
+      }
       return;
     }
-
-    const attachmentList = [...message.attachments.values()]
-      .map((attachment) => `• [${attachment.name ?? 'attachment'}](${attachment.url})`)
-      .slice(0, 10);
-
-    const embed = new EmbedBuilder()
-      .setColor(0x2b2d31)
-      .setAuthor({ name: `${message.author.tag} in DM relay`, iconURL: message.author.displayAvatarURL() })
-      .setDescription(truncate(message.content?.trim() || '*No text content*', 4096))
-      .addFields(
-        { name: 'User ID', value: message.author.id, inline: true },
-        { name: 'Relay started', value: session.startedAt ? `<t:${Math.floor(new Date(session.startedAt).getTime() / 1000)}:F>` : 'Unknown', inline: true },
-      )
-      .setTimestamp(new Date());
-
-    if (attachmentList.length > 0) {
-      embed.addFields({ name: 'Attachments', value: truncate(attachmentList.join('\n'), 1024) });
-    }
-
-    await relayChannel.send({ embeds: [embed], allowedMentions: { parse: [] } });
   } catch (error) {
     console.error('Message relay failed:', error);
   }

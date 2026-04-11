@@ -9,9 +9,16 @@ A Node.js + discord.js bot with:
 
 ## What it does
 
-This bot lets a moderator invite a user into a relay flow. The user receives a DM with accept/decline buttons. If they accept, any new DMs they send to the bot are forwarded into the configured server channel.
+This bot creates private temporary channels for moderation and support interactions:
 
-This is intentionally opt-in. It does not silently forward private messages.
+- **Relay channels**: When you invite a user with `/relayrequest`, a private channel is created where:
+  - Only the user and a specified role (ID: 1492370989399543808) can see the channel
+  - Messages flow both ways: user DMs ↔ server channel
+  - The channel is deleted when the relay ends
+  
+- **Ban command**: Use `/ban` to ban users and automatically close their relay channel
+
+This is opt-in and consent-based. Users receive a DM invitation and must accept to start the relay.
 
 ## Setup
 
@@ -31,19 +38,27 @@ This is intentionally opt-in. It does not silently forward private messages.
 
 - `/ping` checks latency.
 - `/about` explains the bot.
-- `/setrelaychannel` sets the server text channel used for forwarded relays.
-- `/relayrequest user:<member> note:<optional>` sends the opt-in DM invitation.
-- `/relayend user:<member>` stops an active relay session.
+- `/relayrequest user:<member> note:<optional>` creates a private temporary channel and sends the user a DM invitation.
+- `/relayend user:<member>` stops the relay and deletes the channel.
+- `/ban user:<member> reason:<optional>` bans a user and closes their relay channel.
+
+## Relay Setup
+
+Relay channels automatically restrict visibility to:
+- The specified role (ID: 1492370989399543808)
+- The invited user
+
+Edit the `RELAY_ROLE_ID` constant in [src/index.js](src/index.js) if you want a different moderator role.
 
 ## Development
 
 ```bash
 npm install
-npm run deploy
-npm start
+npm.cmd run deploy
+npm.cmd start
 ```
 
-If you are testing in one server, keep `GUILD_ID` set so slash commands appear immediately. If you want global commands later, remove `GUILD_ID` and run `npm run deploy` again.
+On Windows, use `npm.cmd` instead of `npm` if you hit PowerShell execution policy blocks.
 
 ## Free deployment options
 

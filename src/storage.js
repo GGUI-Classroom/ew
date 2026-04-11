@@ -4,8 +4,8 @@ import path from 'node:path';
 const dataDirectory = path.join(process.cwd(), 'data');
 const stateFile = path.join(dataDirectory, 'state.json');
 const defaultState = {
-  relayChannelId: null,
   activeRelays: {},
+  bannedUsers: [],
 };
 
 export async function loadState() {
@@ -18,6 +18,7 @@ export async function loadState() {
       ...defaultState,
       ...parsedState,
       activeRelays: parsedState.activeRelays ?? {},
+      bannedUsers: parsedState.bannedUsers ?? [],
     };
   } catch (error) {
     if (error?.code !== 'ENOENT') {
