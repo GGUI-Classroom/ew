@@ -329,15 +329,17 @@ async function startBot() {
 
   if (!token) {
     console.error('Startup error: DISCORD_TOKEN is missing. Set it in Render environment variables.');
-    process.exit(1);
+    console.error('Health server is still running on port ' + port);
+    return;
   }
 
   try {
     await client.login(token);
+    console.log('Discord bot connected and ready.');
   } catch (error) {
     console.error('Discord login failed. Common causes: invalid token, token reset in developer portal, or malformed env value.');
     console.error(error);
-    process.exit(1);
+    console.error('Health server is still running on port ' + port + '. Please check your environment variables.');
   }
 }
 
