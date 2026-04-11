@@ -159,7 +159,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return;
       }
 
-      if (interaction.commandName === 'relayrequest') {
+      if (interaction.commandName === 'dmconnect') {
         const targetUser = interaction.options.getUser('user', true);
         const note = interaction.options.getString('note');
 
@@ -178,11 +178,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
           components: [
             new ActionRowBuilder().addComponents(
               new ButtonBuilder()
-                .setCustomId(`relay_accept:${interaction.user.id}:${interaction.guildId}:${Date.now()}`)
-                .setLabel('Accept relay')
+                .setCustomId(`dmconnect_accept:${interaction.user.id}:${interaction.guildId}:${Date.now()}`)
+                .setLabel('Accept DM connection')
                 .setStyle(ButtonStyle.Success),
               new ButtonBuilder()
-                .setCustomId(`relay_decline`)
+                .setCustomId(`dmconnect_decline`)
                 .setLabel('Decline')
                 .setStyle(ButtonStyle.Danger),
             ),
@@ -190,7 +190,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         });
 
         await interaction.reply({
-          content: `Sent a relay invitation to ${targetUser.tag}.`,
+          content: `Sent a DM connection invitation to ${targetUser.tag}.`,
           ephemeral: true,
         });
 
@@ -198,16 +198,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return;
       }
 
-      if (interaction.commandName === 'relayend') {
+      if (interaction.commandName === 'dmend') {
         const targetUser = interaction.options.getUser('user') ?? interaction.user;
         const session = await stopRelay(targetUser.id);
 
         if (!session) {
-          await interaction.reply({ content: `No active relay exists for ${targetUser.tag}.`, ephemeral: true });
+          await interaction.reply({ content: `No active DM connection exists for ${targetUser.tag}.`, ephemeral: true });
           return;
         }
 
-        await interaction.reply({ content: `Relay ended for ${targetUser.tag}. Channel deleted.`, ephemeral: true });
+        await interaction.reply({ content: `DM connection ended for ${targetUser.tag}. Channel deleted.`, ephemeral: true });
         return;
       }
 
@@ -241,11 +241,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isButton()) {
       const [action, requesterId, guildId, timestamp] = interaction.customId.split(':');
 
-      if (action !== 'relay_accept' && action !== 'relay_decline') {
+      if (action !== 'dmconnect_accept' && action !== 'dmconnect_decline') {
         return;
       }
 
-      if (action === 'relay_decline') {
+      if (action === 'dmconnect_decline') {
         await interaction.update({
           content: 'You declined the relay request.',
           components: [],
@@ -271,7 +271,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
 
       await interaction.update({
-        content: `Relay accepted. Channel created in **${guild.name}**.`,
+        content: `DM connection accepted. Channel created in **${guild.name}**.`,
         components: [],
       });
     }

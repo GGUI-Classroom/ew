@@ -8,13 +8,13 @@ export const commandDefinitions = [
     .setName('about')
     .setDescription('Show what this bot can do.'),
   new SlashCommandBuilder()
-    .setName('relayrequest')
-    .setDescription('Send a consent-based DM relay invitation to create a temporary channel.')
+    .setName('dmconnect')
+    .setDescription('Create a DM connection with a user in a private channel.')
     .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageMessages)
     .addUserOption((option) =>
       option
         .setName('user')
-        .setDescription('The user to invite into the relay.')
+        .setDescription('The user to connect with.')
         .setRequired(true),
     )
     .addStringOption((option) =>
@@ -25,13 +25,13 @@ export const commandDefinitions = [
         .setMaxLength(200),
     ),
   new SlashCommandBuilder()
-    .setName('relayend')
-    .setDescription('End an active relay session and delete the channel.')
+    .setName('dmend')
+    .setDescription('End a DM connection and delete the channel.')
     .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageMessages)
     .addUserOption((option) =>
       option
         .setName('user')
-        .setDescription('The user whose relay should be ended.')
+        .setDescription('The user whose DM connection should be ended.')
         .setRequired(false),
     ),
   new SlashCommandBuilder()
