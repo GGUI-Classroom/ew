@@ -37,6 +37,10 @@ function truncate(text, limit) {
   return `${text.slice(0, limit - 3)}...`;
 }
 
+function findRelaySessionByChannelId(channelId) {
+  return Object.entries(state.activeRelays).find(([, session]) => session.channelId === channelId) ?? null;
+}
+
 async function createRelayChannel(guild, targetUser, invoker) {
   const channelName = `relay-${targetUser.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 32);
 
@@ -295,31 +299,39 @@ client.on(Events.MessageCreate, async (message) => {
       return;
     }
 
-    const userRelaySession = state.activeRelays[message.author.id];
-
-    if (!userRelaySession) {
-      return;
-    }
-
     console.log(`[DM Connection] Message from ${message.author.tag}. Guild: ${message.guild?.name ?? 'DM'}, Channel: ${message.channelId}`);
 
-    if (message.guild && userRelaySession.channelId === message.channelId) {
-      console.log(`[DM Connection] Relay channel message detected. Sending to DM.`);
-      const dmUser = await client.users.fetch(message.author.id).catch(() => null);
+    if (message.guild) {
+      const relaySessionEntry = findRelaySessionByChannelId(message.channelId);
+
+      if (!relaySessionEntry) {
+        return;
+      }
+
+      const [targetUserId, relaySession] = relaySessionEntry;
+
+      console.log(`[DM Connection] Relay channel message detected. Sending to DM for user ${targetUserId}.`);
+
+      const dmUser = await client.users.fetch(targetUserId).catch((err) => {
+        console.log(`[DM Connection] Could not fetch target user ${targetUserId}:`, err.message);
+        return null;
+      });
+
       if (!dmUser) {
-        console.log(`[DM Connection] Could not fetch user ${message.author.id}`);
         return;
       }
 
       const embed = new EmbedBuilder()
         .setColor(0x5865f2)
-        .setAuthor({ name: `Message from server relay`, iconURL: message.author.displayAvatarURL() })
+        .setAuthor({ name: `Message from ${message.author.tag} in relay`, iconURL: message.author.displayAvatarURL() })
         .setDescription(truncate(message.content?.trim() || '*No text content*', 4096))
         .setTimestamp(new Date());
 
       await dmUser.send({ embeds: [embed] }).catch((err) => console.log(`[DM Connection] Failed to send DM:`, err.message));
       return;
     }
+
+    const userRelaySession = state.activeRelays[message.author.id];
 
     if (!message.guild && userRelaySession) {
       console.log(`[DM Connection] DM message detected. Sending to relay channel.`);
