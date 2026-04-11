@@ -448,7 +448,7 @@ async function startBot() {
     await Promise.race([
       client.login(token),
       new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Discord login timed out after 45s')), 45000);
+        setTimeout(() => reject(new Error('Discord login timed out after 180s')), 180000);
       }),
     ]);
     console.log('Discord client login call completed.');
