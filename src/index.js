@@ -323,20 +323,40 @@ client.on(Events.MessageCreate, async (message) => {
 
     if (!message.guild && userRelaySession) {
       console.log(`[DM Connection] DM message detected. Sending to relay channel.`);
-      const guild = await client.guilds.fetch(userRelaySession.guildId).catch(() => null);
-      const channel = guild ? await guild.channels.fetch(userRelaySession.channelId).catch(() => null) : null;
-
-      if (channel && channel.isTextBased()) {
-        const embed = new EmbedBuilder()
-          .setColor(0x2b2d31)
-          .setAuthor({ name: `${message.author.tag} (DM)`, iconURL: message.author.displayAvatarURL() })
-          .setDescription(truncate(message.content?.trim() || '*No text content*', 4096))
-          .setTimestamp(new Date());
-
-        await channel.send({ embeds: [embed] }).catch((err) => console.log(`[DM Connection] Failed to send to channel:`, err.message));
-      } else {
-        console.log(`[DM Connection] Channel not found or not text-based`);
+      console.log(`[DM Connection] Session data:`, userRelaySession);
+      const guild = await client.guilds.fetch(userRelaySession.guildId).catch((err) => {
+        console.log(`[DM Connection] Failed to fetch guild:`, err.message);
+        return null;
+      });
+      if (!guild) {
+        console.log(`[DM Connection] Guild is null after fetch`);
+        return;
       }
+      const channel = await guild.channels.fetch(userRelaySession.channelId).catch((err) => {
+        console.log(`[DM Connection] Failed to fetch channel:`, err.message);
+        return null;
+      });
+
+      if (!channel) {
+        console.log(`[DM Connection] Channel is null after fetch`);
+        return;
+      }
+      if (!channel.isTextBased()) {
+        console.log(`[DM Connection] Channel is not text-based`);
+        return;
+      }
+
+      const embed = new EmbedBuilder()
+        .setColor(0x2b2d31)
+        .setAuthor({ name: `${message.author.tag} (DM)`, iconURL: message.author.displayAvatarURL() })
+        .setDescription(truncate(message.content?.trim() || '*No text content*', 4096))
+        .setTimestamp(new Date());
+
+      console.log(`[DM Connection] Attempting to send embed to channel ${userRelaySession.channelId}`);
+      await channel.send({ embeds: [embed] }).catch((err) => {
+        console.log(`[DM Connection] Failed to send to channel:`, err.message);
+      });
+      console.log(`[DM Connection] Message sent successfully`);
       return;
     }
   } catch (error) {
