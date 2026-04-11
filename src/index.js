@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import http from 'node:http';
 import {
+  ActivityType,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
@@ -18,6 +19,14 @@ import { loadState, saveState } from './storage.js';
 const token = process.env.DISCORD_TOKEN;
 const port = Number(process.env.PORT || 0);
 const RELAY_ROLE_ID = '1492370989399543808';
+const PRESENCE_ROTATION_MS = 30000;
+
+const presenceStates = [
+  { name: 'G.GUI', type: ActivityType.Playing },
+  { name: 'Chilling...', type: ActivityType.Custom },
+  { name: 'DM connections', type: ActivityType.Watching },
+  { name: 'your messages', type: ActivityType.Listening },
+];
 
 const state = await loadState();
 const client = new Client({
@@ -39,6 +48,22 @@ function truncate(text, limit) {
 
 function findRelaySessionByChannelId(channelId) {
   return Object.entries(state.activeRelays).find(([, session]) => session.channelId === channelId) ?? null;
+}
+
+function startPresenceLoop() {
+  let index = 0;
+
+  const applyPresence = () => {
+    const activity = presenceStates[index % presenceStates.length];
+    client.user?.setPresence({
+      activities: [activity],
+      status: 'online',
+    });
+    index += 1;
+  };
+
+  applyPresence();
+  setInterval(applyPresence, PRESENCE_ROTATION_MS);
 }
 
 async function createRelayChannel(guild, targetUser, invoker) {
@@ -380,6 +405,7 @@ client.once(Events.ClientReady, (readyClient) => {
   console.log(`Logged in as ${readyClient.user.tag}`);
   console.log(`Loaded ${commandData.length} slash commands.`);
   console.log(`Active relay sessions: ${Object.keys(state.activeRelays).length}`);
+  startPresenceLoop();
 });
 
 client.on('error', (error) => {
