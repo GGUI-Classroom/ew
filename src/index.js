@@ -445,12 +445,7 @@ async function startBot() {
 
   try {
     console.log('Attempting to login with Discord token...');
-    await Promise.race([
-      client.login(token),
-      new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Discord login timed out after 180s')), 180000);
-      }),
-    ]);
+    await client.login(token);
     console.log('Discord client login call completed.');
   } catch (error) {
     console.error('Discord login threw an exception:', error.message);
