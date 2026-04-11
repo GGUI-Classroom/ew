@@ -307,6 +307,14 @@ client.once(Events.ClientReady, (readyClient) => {
   console.log(`Active relay sessions: ${Object.keys(state.activeRelays).length}`);
 });
 
+client.on('error', (error) => {
+  console.error('Discord client error:', error.message);
+});
+
+client.on('warn', (warn) => {
+  console.warn('Discord client warning:', warn);
+});
+
 if (port > 0) {
   const healthServer = http.createServer((req, res) => {
     if (req.url === '/health') {
@@ -334,12 +342,13 @@ async function startBot() {
   }
 
   try {
+    console.log('Attempting to login with Discord token...');
     await client.login(token);
-    console.log('Discord bot connected and ready.');
+    console.log('Discord client login call completed.');
   } catch (error) {
-    console.error('Discord login failed. Common causes: invalid token, token reset in developer portal, or malformed env value.');
-    console.error(error);
-    console.error('Health server is still running on port ' + port + '. Please check your environment variables.');
+    console.error('Discord login threw an exception:', error.message);
+    console.error('Full error:', error);
+    console.error('Health server is still running on port ' + port + '. Please check your environment variables and Discord Developer Portal intents.');
   }
 }
 
