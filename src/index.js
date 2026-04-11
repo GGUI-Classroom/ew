@@ -297,9 +297,17 @@ client.on(Events.MessageCreate, async (message) => {
 
     const userRelaySession = state.activeRelays[message.author.id];
 
-    if (message.guild && userRelaySession && userRelaySession.channelId === message.channelId) {
+    if (!userRelaySession) {
+      return;
+    }
+
+    console.log(`[DM Connection] Message from ${message.author.tag}. Guild: ${message.guild?.name ?? 'DM'}, Channel: ${message.channelId}`);
+
+    if (message.guild && userRelaySession.channelId === message.channelId) {
+      console.log(`[DM Connection] Relay channel message detected. Sending to DM.`);
       const dmUser = await client.users.fetch(message.author.id).catch(() => null);
       if (!dmUser) {
+        console.log(`[DM Connection] Could not fetch user ${message.author.id}`);
         return;
       }
 
@@ -309,11 +317,12 @@ client.on(Events.MessageCreate, async (message) => {
         .setDescription(truncate(message.content?.trim() || '*No text content*', 4096))
         .setTimestamp(new Date());
 
-      await dmUser.send({ embeds: [embed] }).catch(() => null);
+      await dmUser.send({ embeds: [embed] }).catch((err) => console.log(`[DM Connection] Failed to send DM:`, err.message));
       return;
     }
 
     if (!message.guild && userRelaySession) {
+      console.log(`[DM Connection] DM message detected. Sending to relay channel.`);
       const guild = await client.guilds.fetch(userRelaySession.guildId).catch(() => null);
       const channel = guild ? await guild.channels.fetch(userRelaySession.channelId).catch(() => null) : null;
 
@@ -324,7 +333,9 @@ client.on(Events.MessageCreate, async (message) => {
           .setDescription(truncate(message.content?.trim() || '*No text content*', 4096))
           .setTimestamp(new Date());
 
-        await channel.send({ embeds: [embed] }).catch(() => null);
+        await channel.send({ embeds: [embed] }).catch((err) => console.log(`[DM Connection] Failed to send to channel:`, err.message));
+      } else {
+        console.log(`[DM Connection] Channel not found or not text-based`);
       }
       return;
     }
