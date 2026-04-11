@@ -9,7 +9,7 @@
     "deploy": "node src/deploy-commands.js"
   },
   "engines": {
-    "node": ">=18.18.0"
+    "node": "20.x"
   },
   "dependencies": {
     "discord.js": "^14.22.1",

@@ -23,7 +23,7 @@ const PRESENCE_ROTATION_MS = 30000;
 
 const presenceStates = [
   { name: 'G.GUI', type: ActivityType.Playing },
-  { name: 'Chilling...', type: ActivityType.Custom },
+  { name: 'Chilling in G.GUI', type: ActivityType.Playing },
   { name: 'DM connections', type: ActivityType.Watching },
   { name: 'your messages', type: ActivityType.Listening },
 ];
@@ -59,6 +59,7 @@ function startPresenceLoop() {
       activities: [activity],
       status: 'online',
     });
+    console.log(`[Presence] Updated status to ${ActivityType[activity.type]} ${activity.name}`);
     index += 1;
   };
 
@@ -444,7 +445,12 @@ async function startBot() {
 
   try {
     console.log('Attempting to login with Discord token...');
-    await client.login(token);
+    await Promise.race([
+      client.login(token),
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Discord login timed out after 45s')), 45000);
+      }),
+    ]);
     console.log('Discord client login call completed.');
   } catch (error) {
     console.error('Discord login threw an exception:', error.message);
