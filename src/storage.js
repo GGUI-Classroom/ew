@@ -7,6 +7,9 @@ const defaultState = {
   activeRelays: {},
   bannedUsers: [],
   warnings: {},
+  adminRoleIds: [],
+  adminUserIds: [],
+  dispenserLinks: [],
 };
 
 export async function loadState() {
@@ -21,6 +24,9 @@ export async function loadState() {
       activeRelays: parsedState.activeRelays ?? {},
       bannedUsers: parsedState.bannedUsers ?? [],
       warnings: parsedState.warnings ?? {},
+      adminRoleIds: parsedState.adminRoleIds ?? [],
+      adminUserIds: parsedState.adminUserIds ?? parsedState.dispenserAdmins ?? [],
+      dispenserLinks: parsedState.dispenserLinks ?? [],
     };
   } catch (error) {
     if (error?.code !== 'ENOENT') {

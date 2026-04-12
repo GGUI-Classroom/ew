@@ -13,6 +13,7 @@ import {
   MessageFlags,
   Partials,
   PermissionsBitField,
+  StringSelectMenuBuilder,
 } from 'discord.js';
 import { commandData } from './commands.js';
 import { loadState, saveState } from './storage.js';
@@ -32,6 +33,11 @@ const presenceStates = [
 
 const state = await loadState();
 state.warnings ??= {};
+state.adminRoleIds ??= [RELAY_ROLE_ID];
+state.adminUserIds ??= [];
+state.dispenserLinks ??= [];
+
+const dispenserSelections = new Map();
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.DirectMessages, GatewayIntentBits.MessageContent],
@@ -66,6 +72,75 @@ function parseDurationToMs(raw) {
   }
 
   return ms;
+}
+
+function normalizeCategory(value) {
+  return value.trim().toLowerCase();
+}
+
+function buildLinkId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function isServerAdministrator(interaction) {
+  return interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator) ?? false;
+}
+
+function hasConfiguredAdminRole(interaction) {
+  if (!interaction.inGuild()) {
+    return false;
+  }
+
+  const roleIds = interaction.member?.roles?.cache?.keys?.();
+  if (!roleIds) {
+    return false;
+  }
+
+  for (const roleId of roleIds) {
+    if (state.adminRoleIds.includes(roleId)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isBotAdmin(interaction) {
+  return isServerAdministrator(interaction) || state.adminUserIds.includes(interaction.user.id) || hasConfiguredAdminRole(interaction);
+}
+
+function getDispenserCategoryOptions(key) {
+  const values = [...new Set(state.dispenserLinks.map((entry) => entry[key]))].sort();
+  return ['any', ...values].slice(0, 25);
+}
+
+function buildDispenserPanelComponents() {
+  const filterOptions = getDispenserCategoryOptions('filter').map((value) => ({
+    label: value === 'any' ? 'Any filter' : value,
+    value,
+  }));
+  const typeOptions = getDispenserCategoryOptions('type').map((value) => ({
+    label: value === 'any' ? 'Any type' : value,
+    value,
+  }));
+
+  const filterMenu = new StringSelectMenuBuilder()
+    .setCustomId('dispenser_filter')
+    .setPlaceholder('Choose a filter')
+    .addOptions(filterOptions);
+
+  const typeMenu = new StringSelectMenuBuilder()
+    .setCustomId('dispenser_type')
+    .setPlaceholder('Choose a type')
+    .addOptions(typeOptions);
+
+  const dispenseButton = new ButtonBuilder().setCustomId('dispenser_dispense').setLabel('Dispense Link').setStyle(ButtonStyle.Success);
+
+  return [
+    new ActionRowBuilder().addComponents(filterMenu),
+    new ActionRowBuilder().addComponents(typeMenu),
+    new ActionRowBuilder().addComponents(dispenseButton),
+  ];
 }
 
 function findRelaySessionByChannelId(channelId) {
@@ -233,13 +308,35 @@ async function handleReactionRoleButton(interaction) {
 }
 
 async function handleChatCommand(interaction) {
+  const adminOnlyCommands = new Set([
+    'admin',
+    'say',
+    'poll',
+    'dmconnect',
+    'dmend',
+    'ban',
+    'kick',
+    'timeout',
+    'untimeout',
+    'purge',
+    'warn',
+    'warnings',
+    'reactionrole',
+    'dispenser',
+  ]);
+
+  if (adminOnlyCommands.has(interaction.commandName) && !isBotAdmin(interaction)) {
+    await replyEphemeral(interaction, 'You do not have bot admin access for this command.');
+    return;
+  }
+
   if (interaction.commandName === 'ping') {
     await replyEphemeral(interaction, `Pong. API latency is ${Math.round(client.ws.ping)}ms.`);
     return;
   }
 
   if (interaction.commandName === 'about') {
-    await replyEphemeral(interaction, 'G.GUI bot provides moderation tools, reaction roles, and two-way DM connection channels.');
+    await replyEphemeral(interaction, 'G.GUI bot provides moderation tools, reaction roles, DM connections, and a configurable link dispenser panel.');
     return;
   }
 
@@ -254,10 +351,76 @@ async function handleChatCommand(interaction) {
         { name: 'Moderation', value: '`/ban` `/kick` `/timeout` `/untimeout` `/purge` `/warn` `/warnings`' },
         { name: 'DM Link', value: '`/dmconnect` `/dmend` `/dmstatus`' },
         { name: 'Reaction Roles', value: '`/reactionrole`' },
+        { name: 'Global Admin', value: '`/admin addrole|removerole|listroles|adduser|removeuser|listusers`' },
+        { name: 'Dispenser', value: '`/dispenser addlink|removelink|listlinks|panel`' },
       );
 
     await interaction.reply({ embeds: [helpEmbed], flags: MessageFlags.Ephemeral });
     return;
+  }
+
+  if (interaction.commandName === 'admin') {
+    const subcommand = interaction.options.getSubcommand(true);
+
+    if (subcommand === 'addrole') {
+      const role = interaction.options.getRole('role', true);
+
+      if (!state.adminRoleIds.includes(role.id)) {
+        state.adminRoleIds.push(role.id);
+        await saveState(state);
+      }
+
+      await replyEphemeral(interaction, `Added ${role} to bot admin roles.`);
+      return;
+    }
+
+    if (subcommand === 'removerole') {
+      const role = interaction.options.getRole('role', true);
+      state.adminRoleIds = state.adminRoleIds.filter((id) => id !== role.id);
+      await saveState(state);
+      await replyEphemeral(interaction, `Removed ${role} from bot admin roles.`);
+      return;
+    }
+
+    if (subcommand === 'listroles') {
+      if (state.adminRoleIds.length === 0) {
+        await replyEphemeral(interaction, 'No bot admin roles configured.');
+        return;
+      }
+
+      await replyEphemeral(interaction, `Bot admin roles:\n${state.adminRoleIds.map((id) => `- <@&${id}>`).join('\n')}`);
+      return;
+    }
+
+    if (subcommand === 'adduser') {
+      const user = interaction.options.getUser('user', true);
+
+      if (!state.adminUserIds.includes(user.id)) {
+        state.adminUserIds.push(user.id);
+        await saveState(state);
+      }
+
+      await replyEphemeral(interaction, `Added ${user.tag} to bot admin users.`);
+      return;
+    }
+
+    if (subcommand === 'removeuser') {
+      const user = interaction.options.getUser('user', true);
+      state.adminUserIds = state.adminUserIds.filter((id) => id !== user.id);
+      await saveState(state);
+      await replyEphemeral(interaction, `Removed ${user.tag} from bot admin users.`);
+      return;
+    }
+
+    if (subcommand === 'listusers') {
+      if (state.adminUserIds.length === 0) {
+        await replyEphemeral(interaction, 'No bot admin users configured.');
+        return;
+      }
+
+      await replyEphemeral(interaction, `Bot admin users:\n${state.adminUserIds.map((id) => `- <@${id}>`).join('\n')}`);
+      return;
+    }
   }
 
   if (interaction.commandName === 'serverinfo') {
@@ -389,6 +552,116 @@ async function handleChatCommand(interaction) {
     const activeCount = Object.keys(state.activeRelays).length;
     await replyEphemeral(interaction, `Active DM connections: ${activeCount}`);
     return;
+  }
+
+  if (interaction.commandName === 'dispenser') {
+    if (!interaction.inGuild()) {
+      await replyEphemeral(interaction, 'The dispenser command can only be used in a server.');
+      return;
+    }
+
+    const subcommand = interaction.options.getSubcommand(true);
+
+    if (subcommand === 'addlink') {
+      const url = interaction.options.getString('url', true).trim();
+      const filter = normalizeCategory(interaction.options.getString('filter', true));
+      const type = normalizeCategory(interaction.options.getString('type', true));
+
+      try {
+        new URL(url);
+      } catch {
+        await replyEphemeral(interaction, 'Invalid URL. Please provide a full URL including protocol (https://...).');
+        return;
+      }
+
+      const entry = {
+        id: buildLinkId(),
+        url,
+        filter,
+        type,
+        createdBy: interaction.user.id,
+        createdAt: new Date().toISOString(),
+      };
+
+      state.dispenserLinks.push(entry);
+      await saveState(state);
+
+      await replyEphemeral(interaction, `Saved link \`${entry.id}\` for filter \`${filter}\` and type \`${type}\`.`);
+      return;
+    }
+
+    if (subcommand === 'removelink') {
+      const id = interaction.options.getString('id')?.trim();
+      const url = interaction.options.getString('url')?.trim();
+
+      if (!id && !url) {
+        await replyEphemeral(interaction, 'Provide either an id or a url to remove.');
+        return;
+      }
+
+      const previousLength = state.dispenserLinks.length;
+      state.dispenserLinks = state.dispenserLinks.filter((entry) => {
+        if (id && entry.id === id) {
+          return false;
+        }
+
+        if (url && entry.url === url) {
+          return false;
+        }
+
+        return true;
+      });
+
+      if (state.dispenserLinks.length === previousLength) {
+        await replyEphemeral(interaction, 'No matching link found for the provided id/url.');
+        return;
+      }
+
+      await saveState(state);
+      await replyEphemeral(interaction, 'Matching link(s) removed.');
+      return;
+    }
+
+    if (subcommand === 'listlinks') {
+      const filterOption = interaction.options.getString('filter');
+      const typeOption = interaction.options.getString('type');
+      const filter = filterOption ? normalizeCategory(filterOption) : null;
+      const type = typeOption ? normalizeCategory(typeOption) : null;
+
+      const filtered = state.dispenserLinks.filter((entry) => (!filter || entry.filter === filter) && (!type || entry.type === type));
+
+      if (filtered.length === 0) {
+        await replyEphemeral(interaction, 'No links found for that filter/type selection.');
+        return;
+      }
+
+      const preview = filtered.slice(0, 20).map((entry) => `• \`${entry.id}\` | ${entry.filter}/${entry.type} | ${entry.url}`);
+      const suffix = filtered.length > 20 ? `\n...and ${filtered.length - 20} more.` : '';
+      await replyEphemeral(interaction, `Stored links (${filtered.length}):\n${preview.join('\n')}${suffix}`);
+      return;
+    }
+
+    if (subcommand === 'panel') {
+      if (state.dispenserLinks.length === 0) {
+        await replyEphemeral(interaction, 'No links exist yet. Add links first with `/dispenser addlink`.');
+        return;
+      }
+
+      const title = interaction.options.getString('title') ?? 'Link Dispenser';
+      const description = interaction.options.getString('description') ?? 'Choose a filter and type, then click Dispense Link.';
+      const embed = new EmbedBuilder()
+        .setColor(0x3498db)
+        .setTitle(title)
+        .setDescription(description)
+        .addFields(
+          { name: 'Available filters', value: getDispenserCategoryOptions('filter').filter((v) => v !== 'any').join(', ') || 'None' },
+          { name: 'Available types', value: getDispenserCategoryOptions('type').filter((v) => v !== 'any').join(', ') || 'None' },
+        );
+
+      await interaction.channel.send({ embeds: [embed], components: buildDispenserPanelComponents() });
+      await replyEphemeral(interaction, 'Dispenser panel posted.');
+      return;
+    }
   }
 
   if (interaction.commandName === 'ban') {
@@ -548,9 +821,57 @@ async function handleChatCommand(interaction) {
 
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
+    if (interaction.isStringSelectMenu()) {
+      if (interaction.customId !== 'dispenser_filter' && interaction.customId !== 'dispenser_type') {
+        return;
+      }
+
+      const selectionKey = `${interaction.message.id}:${interaction.user.id}`;
+      const current = dispenserSelections.get(selectionKey) ?? { filter: 'any', type: 'any' };
+
+      if (interaction.customId === 'dispenser_filter') {
+        current.filter = interaction.values[0];
+      } else {
+        current.type = interaction.values[0];
+      }
+
+      dispenserSelections.set(selectionKey, current);
+      await interaction.reply({
+        content: `Selection updated. Filter: **${current.filter}** | Type: **${current.type}**`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
     if (interaction.isButton()) {
       if (interaction.customId.startsWith('rr_toggle:')) {
         await handleReactionRoleButton(interaction);
+        return;
+      }
+
+      if (interaction.customId === 'dispenser_dispense') {
+        const selectionKey = `${interaction.message.id}:${interaction.user.id}`;
+        const selected = dispenserSelections.get(selectionKey) ?? { filter: 'any', type: 'any' };
+
+        const matches = state.dispenserLinks.filter((entry) => {
+          const filterMatch = selected.filter === 'any' || entry.filter === selected.filter;
+          const typeMatch = selected.type === 'any' || entry.type === selected.type;
+          return filterMatch && typeMatch;
+        });
+
+        if (matches.length === 0) {
+          await interaction.reply({
+            content: 'No links available for this specification',
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        const chosen = matches[Math.floor(Math.random() * matches.length)];
+        await interaction.reply({
+          content: `Here is your link (${chosen.filter}/${chosen.type}): ${chosen.url}`,
+          flags: MessageFlags.Ephemeral,
+        });
         return;
       }
 

@@ -100,6 +100,67 @@ export const commandDefinitions = [
     .addRoleOption((option) => option.setName('role').setDescription('Role to toggle').setRequired(true))
     .addStringOption((option) => option.setName('label').setDescription('Button label').setRequired(false).setMaxLength(80))
     .addStringOption((option) => option.setName('emoji').setDescription('Optional emoji').setRequired(false).setMaxLength(20)),
+  new SlashCommandBuilder()
+    .setName('admin')
+    .setDescription('Manage bot-wide admin access by role or user id.')
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('addrole')
+        .setDescription('Grant bot admin access to a role.')
+        .addRoleOption((option) => option.setName('role').setDescription('Role to grant').setRequired(true)),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('removerole')
+        .setDescription('Remove bot admin access from a role.')
+        .addRoleOption((option) => option.setName('role').setDescription('Role to remove').setRequired(true)),
+    )
+    .addSubcommand((subcommand) => subcommand.setName('listroles').setDescription('List role-based bot admins.'))
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('adduser')
+        .setDescription('Grant bot admin access to a user id.')
+        .addUserOption((option) => option.setName('user').setDescription('User to grant').setRequired(true)),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('removeuser')
+        .setDescription('Remove bot admin access from a user id.')
+        .addUserOption((option) => option.setName('user').setDescription('User to remove').setRequired(true)),
+    )
+    .addSubcommand((subcommand) => subcommand.setName('listusers').setDescription('List user-id bot admins.')),
+  new SlashCommandBuilder()
+    .setName('dispenser')
+    .setDescription('Manage and use the link dispenser system.')
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('addlink')
+        .setDescription('Add a link for a filter and type.')
+        .addStringOption((option) => option.setName('url').setDescription('The URL to dispense').setRequired(true).setMaxLength(500))
+        .addStringOption((option) => option.setName('filter').setDescription('Filter category').setRequired(true).setMaxLength(50))
+        .addStringOption((option) => option.setName('type').setDescription('Type category').setRequired(true).setMaxLength(50)),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('removelink')
+        .setDescription('Remove a saved dispenser link by id or url.')
+        .addStringOption((option) => option.setName('id').setDescription('Link id from /dispenser listlinks').setRequired(false).setMaxLength(32))
+        .addStringOption((option) => option.setName('url').setDescription('Exact URL to remove').setRequired(false).setMaxLength(500)),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('listlinks')
+        .setDescription('List saved dispenser links.')
+        .addStringOption((option) => option.setName('filter').setDescription('Optional filter to narrow list').setRequired(false).setMaxLength(50))
+        .addStringOption((option) => option.setName('type').setDescription('Optional type to narrow list').setRequired(false).setMaxLength(50)),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('panel')
+        .setDescription('Post a dispenser panel with filter/type selectors.')
+        .addStringOption((option) => option.setName('title').setDescription('Panel title').setRequired(false).setMaxLength(100))
+        .addStringOption((option) => option.setName('description').setDescription('Panel description').setRequired(false).setMaxLength(300)),
+    ),
 ];
 
 export const commandData = commandDefinitions.map((command) => command.toJSON());
