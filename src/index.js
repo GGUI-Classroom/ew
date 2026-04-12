@@ -616,6 +616,69 @@ async function handleChatCommand(interaction) {
       return;
     }
 
+    if (subcommand === 'bulkadd') {
+      const urlsRaw = interaction.options.getString('urls', true);
+      const filters = parseFilterList(interaction.options.getString('filter', true));
+      const type = normalizeCategory(interaction.options.getString('type', true));
+
+      if (filters.length === 0) {
+        await replyEphemeral(interaction, 'Provide at least one filter. You can comma-separate multiple filters.');
+        return;
+      }
+
+      const urls = [...new Set(urlsRaw.split(/\r?\n/).map((value) => value.trim()).filter(Boolean))];
+
+      if (urls.length === 0) {
+        await replyEphemeral(interaction, 'No URLs detected. Provide one URL per line.');
+        return;
+      }
+
+      let added = 0;
+      let invalid = 0;
+      let skipped = 0;
+
+      for (const url of urls) {
+        try {
+          new URL(url);
+        } catch {
+          invalid += 1;
+          continue;
+        }
+
+        const duplicate = state.dispenserLinks.some((entry) => {
+          const sameUrl = entry.url === url;
+          const sameType = entry.type === type;
+          const sameFilters = JSON.stringify([...(entry.filters ?? [])].sort()) === JSON.stringify([...filters].sort());
+          return sameUrl && sameType && sameFilters;
+        });
+
+        if (duplicate) {
+          skipped += 1;
+          continue;
+        }
+
+        state.dispenserLinks.push({
+          id: buildLinkId(),
+          url,
+          filters,
+          type,
+          createdBy: interaction.user.id,
+          createdAt: new Date().toISOString(),
+        });
+        added += 1;
+      }
+
+      if (added > 0) {
+        await saveState(state);
+      }
+
+      await replyEphemeral(
+        interaction,
+        `Bulk add complete. Added: ${added}, Skipped duplicates: ${skipped}, Invalid URLs: ${invalid}.`,
+      );
+      return;
+    }
+
     if (subcommand === 'removelink') {
       const id = interaction.options.getString('id')?.trim();
       const url = interaction.options.getString('url')?.trim();

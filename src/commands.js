@@ -142,6 +142,20 @@ export const commandDefinitions = [
     )
     .addSubcommand((subcommand) =>
       subcommand
+        .setName('bulkadd')
+        .setDescription('Add multiple links at once (one URL per line).')
+        .addStringOption((option) =>
+          option
+            .setName('urls')
+            .setDescription('URLs, one per line')
+            .setRequired(true)
+            .setMaxLength(4000),
+        )
+        .addStringOption((option) => option.setName('filter').setDescription('Filter categories (comma-separated)').setRequired(true).setMaxLength(200))
+        .addStringOption((option) => option.setName('type').setDescription('Type category').setRequired(true).setMaxLength(50)),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
         .setName('removelink')
         .setDescription('Remove a saved dispenser link by id or url.')
         .addStringOption((option) => option.setName('id').setDescription('Link id from /dispenser listlinks').setRequired(false).setMaxLength(32))
