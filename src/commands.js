@@ -144,15 +144,21 @@ export const commandDefinitions = [
       subcommand
         .setName('bulkadd')
         .setDescription('Add multiple links at once (one URL per line).')
+        .addStringOption((option) => option.setName('filter').setDescription('Filter categories (comma-separated)').setRequired(true).setMaxLength(200))
+        .addStringOption((option) => option.setName('type').setDescription('Type category').setRequired(true).setMaxLength(50))
         .addStringOption((option) =>
           option
             .setName('urls')
-            .setDescription('URLs, one per line')
-            .setRequired(true)
+            .setDescription('URLs, one per line (optional if file is provided)')
+            .setRequired(false)
             .setMaxLength(4000),
         )
-        .addStringOption((option) => option.setName('filter').setDescription('Filter categories (comma-separated)').setRequired(true).setMaxLength(200))
-        .addStringOption((option) => option.setName('type').setDescription('Type category').setRequired(true).setMaxLength(50)),
+        .addAttachmentOption((option) =>
+          option
+            .setName('file')
+            .setDescription('Optional .txt file with one URL per line')
+            .setRequired(false),
+        ),
     )
     .addSubcommand((subcommand) =>
       subcommand

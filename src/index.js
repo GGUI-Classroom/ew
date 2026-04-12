@@ -617,7 +617,8 @@ async function handleChatCommand(interaction) {
     }
 
     if (subcommand === 'bulkadd') {
-      const urlsRaw = interaction.options.getString('urls', true);
+      const urlsRaw = interaction.options.getString('urls');
+      const file = interaction.options.getAttachment('file');
       const filters = parseFilterList(interaction.options.getString('filter', true));
       const type = normalizeCategory(interaction.options.getString('type', true));
 
@@ -626,7 +627,31 @@ async function handleChatCommand(interaction) {
         return;
       }
 
-      const urls = [...new Set(urlsRaw.split(/\r?\n/).map((value) => value.trim()).filter(Boolean))];
+      if (!urlsRaw && !file) {
+        await replyEphemeral(interaction, 'Provide URLs text or upload a .txt file with one URL per line.');
+        return;
+      }
+
+      let combinedRaw = urlsRaw ?? '';
+
+      if (file) {
+        const isTextLike = (file.contentType ?? '').includes('text') || file.name.toLowerCase().endsWith('.txt');
+        if (!isTextLike) {
+          await replyEphemeral(interaction, 'Attachment must be a text file (.txt).');
+          return;
+        }
+
+        const response = await fetch(file.url).catch(() => null);
+        if (!response || !response.ok) {
+          await replyEphemeral(interaction, 'Could not download the attachment. Try uploading again.');
+          return;
+        }
+
+        const fileText = await response.text();
+        combinedRaw = combinedRaw ? `${combinedRaw}\n${fileText}` : fileText;
+      }
+
+      const urls = [...new Set(combinedRaw.split(/\r?\n/).map((value) => value.trim()).filter(Boolean))];
 
       if (urls.length === 0) {
         await replyEphemeral(interaction, 'No URLs detected. Provide one URL per line.');
