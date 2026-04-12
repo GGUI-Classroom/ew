@@ -21,7 +21,7 @@ import { loadState, saveState } from './storage.js';
 const token = process.env.DISCORD_TOKEN;
 const port = Number(process.env.PORT || 0);
 const RELAY_ROLE_ID = '1492370989399543808';
-const PRESENCE_ROTATION_MS = 30000;
+const PRESENCE_ROTATION_MS = 10000;
 const MAX_TIMEOUT_MS = 28 * 24 * 60 * 60 * 1000;
 const PERIOD_MS = {
   day: 24 * 60 * 60 * 1000,
@@ -30,10 +30,8 @@ const PERIOD_MS = {
 };
 
 const presenceStates = [
-  { name: 'G.GUI', type: ActivityType.Playing },
+  { name: 'on G.GUI', type: ActivityType.Playing },
   { name: 'Chilling in G.GUI', type: ActivityType.Playing },
-  { name: 'DM connections', type: ActivityType.Watching },
-  { name: 'your messages', type: ActivityType.Listening },
 ];
 
 const state = await loadState();
