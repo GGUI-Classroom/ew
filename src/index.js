@@ -66,6 +66,7 @@ state.dispenserUsage = state.dispenserUsage.map((entry) => ({
 }));
 
 const dispenserSelections = new Map();
+const dispenserRandomState = new Map();
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.DirectMessages, GatewayIntentBits.MessageContent],
@@ -117,6 +118,54 @@ function parseFilterList(raw) {
 
 function normalizePanelName(raw) {
   return normalizeCategory(raw).slice(0, 50);
+}
+
+function getHostnameSafe(url) {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return 'unknown';
+  }
+}
+
+function shuffleArray(values) {
+  const copy = [...values];
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+function chooseDispenserLink(panelName, selected, matches) {
+  const key = `${panelName}|${selected.filter}|${selected.type}`;
+  const priorState = dispenserRandomState.get(key) ?? { remainingIds: [], lastHostname: null };
+  const linksById = new Map(matches.map((entry) => [entry.id, entry]));
+
+  let remainingIds = priorState.remainingIds.filter((id) => linksById.has(id));
+  if (remainingIds.length === 0) {
+    remainingIds = shuffleArray(matches.map((entry) => entry.id));
+  }
+
+  let candidateIds = [...remainingIds];
+
+  if (priorState.lastHostname) {
+    const differentHostIds = candidateIds.filter((id) => getHostnameSafe(linksById.get(id).url) !== priorState.lastHostname);
+    if (differentHostIds.length > 0) {
+      candidateIds = differentHostIds;
+    }
+  }
+
+  const chosenId = candidateIds[Math.floor(Math.random() * candidateIds.length)];
+  const chosen = linksById.get(chosenId);
+
+  const nextState = {
+    remainingIds: remainingIds.filter((id) => id !== chosenId),
+    lastHostname: getHostnameSafe(chosen.url),
+  };
+
+  dispenserRandomState.set(key, nextState);
+  return chosen;
 }
 
 function buildLinkId() {
@@ -1170,7 +1219,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           return;
         }
 
-        const chosen = matches[Math.floor(Math.random() * matches.length)];
+        const chosen = chooseDispenserLink(panelName, selected, matches);
         state.dispenserUsage.push({ userId: interaction.user.id, panel: panelName, timestamp: Date.now() });
         trimUsageHistory();
         await saveState(state);
