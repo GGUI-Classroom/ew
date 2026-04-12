@@ -136,6 +136,7 @@ export const commandDefinitions = [
       subcommand
         .setName('addlink')
         .setDescription('Add a link for a filter and type.')
+        .addStringOption((option) => option.setName('panel').setDescription('Panel name').setRequired(true).setMaxLength(50))
         .addStringOption((option) => option.setName('url').setDescription('The URL to dispense').setRequired(true).setMaxLength(500))
         .addStringOption((option) => option.setName('filter').setDescription('Filter category (comma-separate for multiple)').setRequired(true).setMaxLength(200))
         .addStringOption((option) => option.setName('type').setDescription('Type category').setRequired(true).setMaxLength(50)),
@@ -144,6 +145,7 @@ export const commandDefinitions = [
       subcommand
         .setName('bulkadd')
         .setDescription('Add multiple links at once (one URL per line).')
+        .addStringOption((option) => option.setName('panel').setDescription('Panel name').setRequired(true).setMaxLength(50))
         .addStringOption((option) => option.setName('filter').setDescription('Filter categories (comma-separated)').setRequired(true).setMaxLength(200))
         .addStringOption((option) => option.setName('type').setDescription('Type category').setRequired(true).setMaxLength(50))
         .addStringOption((option) =>
@@ -164,6 +166,7 @@ export const commandDefinitions = [
       subcommand
         .setName('removelink')
         .setDescription('Remove a saved dispenser link by id or url.')
+        .addStringOption((option) => option.setName('panel').setDescription('Panel name').setRequired(true).setMaxLength(50))
         .addStringOption((option) => option.setName('id').setDescription('Link id from /dispenser listlinks').setRequired(false).setMaxLength(32))
         .addStringOption((option) => option.setName('url').setDescription('Exact URL to remove').setRequired(false).setMaxLength(500)),
     )
@@ -171,15 +174,77 @@ export const commandDefinitions = [
       subcommand
         .setName('listlinks')
         .setDescription('List saved dispenser links.')
+        .addStringOption((option) => option.setName('panel').setDescription('Panel name').setRequired(true).setMaxLength(50))
         .addStringOption((option) => option.setName('filter').setDescription('Optional filter to narrow list').setRequired(false).setMaxLength(50))
         .addStringOption((option) => option.setName('type').setDescription('Optional type to narrow list').setRequired(false).setMaxLength(50)),
     )
     .addSubcommand((subcommand) =>
       subcommand
         .setName('panel')
-        .setDescription('Post a dispenser panel with filter/type selectors.')
+        .setDescription('Post a named dispenser panel with filter/type selectors.')
+        .addStringOption((option) => option.setName('panel').setDescription('Panel name').setRequired(true).setMaxLength(50))
         .addStringOption((option) => option.setName('title').setDescription('Panel title').setRequired(false).setMaxLength(100))
         .addStringOption((option) => option.setName('description').setDescription('Panel description').setRequired(false).setMaxLength(300)),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('setlimit')
+        .setDescription('Set dispense limits per day/week/month for everyone or a role.')
+        .addStringOption((option) => option.setName('panel').setDescription('Panel name').setRequired(true).setMaxLength(50))
+        .addStringOption((option) =>
+          option
+            .setName('period')
+            .setDescription('Quota period')
+            .setRequired(true)
+            .addChoices(
+              { name: 'day', value: 'day' },
+              { name: 'week', value: 'week' },
+              { name: 'month', value: 'month' },
+            ),
+        )
+        .addIntegerOption((option) =>
+          option
+            .setName('limit')
+            .setDescription('Max links per user for this period')
+            .setRequired(true)
+            .setMinValue(1)
+            .setMaxValue(5000),
+        )
+        .addRoleOption((option) =>
+          option
+            .setName('role')
+            .setDescription('Target role (leave empty to target @everyone)')
+            .setRequired(false),
+        ),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('removelimit')
+        .setDescription('Remove a dispense limit for everyone or a role.')
+        .addStringOption((option) => option.setName('panel').setDescription('Panel name').setRequired(true).setMaxLength(50))
+        .addStringOption((option) =>
+          option
+            .setName('period')
+            .setDescription('Quota period')
+            .setRequired(true)
+            .addChoices(
+              { name: 'day', value: 'day' },
+              { name: 'week', value: 'week' },
+              { name: 'month', value: 'month' },
+            ),
+        )
+        .addRoleOption((option) =>
+          option
+            .setName('role')
+            .setDescription('Target role (leave empty to target @everyone)')
+            .setRequired(false),
+        ),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('listlimits')
+        .setDescription('List configured dispenser limits for a panel.')
+        .addStringOption((option) => option.setName('panel').setDescription('Panel name').setRequired(true).setMaxLength(50)),
     ),
 ];
 

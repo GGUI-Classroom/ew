@@ -10,6 +10,9 @@ const defaultState = {
   adminRoleIds: [],
   adminUserIds: [],
   dispenserLinks: [],
+  dispenserLimits: [],
+  dispenserUsage: [],
+  dispenserPanelMessages: {},
 };
 
 export async function loadState() {
@@ -27,6 +30,9 @@ export async function loadState() {
       adminRoleIds: parsedState.adminRoleIds ?? [],
       adminUserIds: parsedState.adminUserIds ?? parsedState.dispenserAdmins ?? [],
       dispenserLinks: parsedState.dispenserLinks ?? [],
+      dispenserLimits: parsedState.dispenserLimits ?? [],
+      dispenserUsage: parsedState.dispenserUsage ?? [],
+      dispenserPanelMessages: parsedState.dispenserPanelMessages ?? {},
     };
   } catch (error) {
     if (error?.code !== 'ENOENT') {

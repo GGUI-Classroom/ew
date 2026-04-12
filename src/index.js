@@ -23,6 +23,11 @@ const port = Number(process.env.PORT || 0);
 const RELAY_ROLE_ID = '1492370989399543808';
 const PRESENCE_ROTATION_MS = 30000;
 const MAX_TIMEOUT_MS = 28 * 24 * 60 * 60 * 1000;
+const PERIOD_MS = {
+  day: 24 * 60 * 60 * 1000,
+  week: 7 * 24 * 60 * 60 * 1000,
+  month: 30 * 24 * 60 * 60 * 1000,
+};
 
 const presenceStates = [
   { name: 'G.GUI', type: ActivityType.Playing },
@@ -36,14 +41,28 @@ state.warnings ??= {};
 state.adminRoleIds ??= [RELAY_ROLE_ID];
 state.adminUserIds ??= [];
 state.dispenserLinks ??= [];
+state.dispenserLimits ??= [];
+state.dispenserUsage ??= [];
+state.dispenserPanelMessages ??= {};
 
 state.dispenserLinks = state.dispenserLinks.map((entry) => ({
   ...entry,
+  panel: entry.panel ? normalizeCategory(String(entry.panel)) : 'default',
   filters: Array.isArray(entry.filters)
     ? entry.filters.map((value) => normalizeCategory(String(value))).filter(Boolean)
     : entry.filter
       ? [normalizeCategory(String(entry.filter))]
       : [],
+}));
+
+state.dispenserLimits = state.dispenserLimits.map((entry) => ({
+  ...entry,
+  panel: entry.panel ? normalizeCategory(String(entry.panel)) : 'default',
+}));
+
+state.dispenserUsage = state.dispenserUsage.map((entry) => ({
+  ...entry,
+  panel: entry.panel ? normalizeCategory(String(entry.panel)) : 'default',
 }));
 
 const dispenserSelections = new Map();
@@ -96,8 +115,16 @@ function parseFilterList(raw) {
   return [...new Set(filters)];
 }
 
+function normalizePanelName(raw) {
+  return normalizeCategory(raw).slice(0, 50);
+}
+
 function buildLinkId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function buildLimitId() {
+  return `limit-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
 function isServerAdministrator(interaction) {
@@ -127,20 +154,35 @@ function isBotAdmin(interaction) {
   return isServerAdministrator(interaction) || state.adminUserIds.includes(interaction.user.id) || hasConfiguredAdminRole(interaction);
 }
 
-function getDispenserCategoryOptions(key) {
+function getDispenserCategoryOptions(panelName, key) {
+  const panelLinks = state.dispenserLinks.filter((entry) => entry.panel === panelName);
   const values =
     key === 'filter'
-      ? [...new Set(state.dispenserLinks.flatMap((entry) => entry.filters ?? []))].sort()
-      : [...new Set(state.dispenserLinks.map((entry) => entry[key]))].sort();
+      ? [...new Set(panelLinks.flatMap((entry) => entry.filters ?? []))].sort()
+      : [...new Set(panelLinks.map((entry) => entry[key]))].sort();
   return ['any', ...values].slice(0, 25);
 }
 
-function buildDispenserPanelComponents() {
-  const filterOptions = getDispenserCategoryOptions('filter').map((value) => ({
+function getUsageCountForPeriod(userId, panelName, period, nowMs = Date.now()) {
+  const windowMs = PERIOD_MS[period];
+  if (!windowMs) {
+    return 0;
+  }
+
+  return state.dispenserUsage.filter((entry) => entry.userId === userId && entry.panel === panelName && nowMs - entry.timestamp <= windowMs).length;
+}
+
+function trimUsageHistory(nowMs = Date.now()) {
+  const keepWindow = PERIOD_MS.month;
+  state.dispenserUsage = state.dispenserUsage.filter((entry) => nowMs - entry.timestamp <= keepWindow);
+}
+
+function buildDispenserPanelComponents(panelName) {
+  const filterOptions = getDispenserCategoryOptions(panelName, 'filter').map((value) => ({
     label: value === 'any' ? 'Any filter' : value,
     value,
   }));
-  const typeOptions = getDispenserCategoryOptions('type').map((value) => ({
+  const typeOptions = getDispenserCategoryOptions(panelName, 'type').map((value) => ({
     label: value === 'any' ? 'Any type' : value,
     value,
   }));
@@ -582,6 +624,12 @@ async function handleChatCommand(interaction) {
     }
 
     const subcommand = interaction.options.getSubcommand(true);
+    const panelName = normalizePanelName(interaction.options.getString('panel', true));
+
+    if (!panelName) {
+      await replyEphemeral(interaction, 'Panel name cannot be empty.');
+      return;
+    }
 
     if (subcommand === 'addlink') {
       const url = interaction.options.getString('url', true).trim();
@@ -602,6 +650,7 @@ async function handleChatCommand(interaction) {
 
       const entry = {
         id: buildLinkId(),
+        panel: panelName,
         url,
         filters,
         type,
@@ -612,7 +661,7 @@ async function handleChatCommand(interaction) {
       state.dispenserLinks.push(entry);
       await saveState(state);
 
-      await replyEphemeral(interaction, `Saved link \`${entry.id}\` for filters \`${filters.join(', ')}\` and type \`${type}\`.`);
+      await replyEphemeral(interaction, `Saved link \`${entry.id}\` in panel \`${panelName}\` for filters \`${filters.join(', ')}\` and type \`${type}\`.`);
       return;
     }
 
@@ -676,10 +725,11 @@ async function handleChatCommand(interaction) {
         }
 
         const duplicate = state.dispenserLinks.some((entry) => {
+          const samePanel = entry.panel === panelName;
           const sameUrl = entry.url === url;
           const sameType = entry.type === type;
           const sameFilters = JSON.stringify([...(entry.filters ?? [])].sort()) === JSON.stringify([...filters].sort());
-          return sameUrl && sameType && sameFilters;
+          return samePanel && sameUrl && sameType && sameFilters;
         });
 
         if (duplicate) {
@@ -689,6 +739,7 @@ async function handleChatCommand(interaction) {
 
         state.dispenserLinks.push({
           id: buildLinkId(),
+          panel: panelName,
           url,
           filters,
           type,
@@ -702,10 +753,7 @@ async function handleChatCommand(interaction) {
         await saveState(state);
       }
 
-      await replyEphemeral(
-        interaction,
-        `Bulk add complete. Added: ${added}, Skipped duplicates: ${skipped}, Invalid URLs: ${invalid}.`,
-      );
+      await replyEphemeral(interaction, `Bulk add complete for panel \`${panelName}\`. Added: ${added}, Skipped duplicates: ${skipped}, Invalid URLs: ${invalid}.`);
       return;
     }
 
@@ -720,6 +768,10 @@ async function handleChatCommand(interaction) {
 
       const previousLength = state.dispenserLinks.length;
       state.dispenserLinks = state.dispenserLinks.filter((entry) => {
+        if (entry.panel !== panelName) {
+          return true;
+        }
+
         if (id && entry.id === id) {
           return false;
         }
@@ -737,7 +789,7 @@ async function handleChatCommand(interaction) {
       }
 
       await saveState(state);
-      await replyEphemeral(interaction, 'Matching link(s) removed.');
+      await replyEphemeral(interaction, `Matching link(s) removed from panel \`${panelName}\`.`);
       return;
     }
 
@@ -748,6 +800,10 @@ async function handleChatCommand(interaction) {
       const type = typeOption ? normalizeCategory(typeOption) : null;
 
       const filtered = state.dispenserLinks.filter((entry) => {
+        if (entry.panel !== panelName) {
+          return false;
+        }
+
         const filterMatch = !filter || (entry.filters ?? []).includes(filter);
         const typeMatch = !type || entry.type === type;
         return filterMatch && typeMatch;
@@ -760,12 +816,14 @@ async function handleChatCommand(interaction) {
 
       const preview = filtered.slice(0, 20).map((entry) => `• \`${entry.id}\` | ${(entry.filters ?? []).join(', ')}/${entry.type} | ${entry.url}`);
       const suffix = filtered.length > 20 ? `\n...and ${filtered.length - 20} more.` : '';
-      await replyEphemeral(interaction, `Stored links (${filtered.length}):\n${preview.join('\n')}${suffix}`);
+      await replyEphemeral(interaction, `Stored links in \`${panelName}\` (${filtered.length}):\n${preview.join('\n')}${suffix}`);
       return;
     }
 
     if (subcommand === 'panel') {
-      if (state.dispenserLinks.length === 0) {
+      const panelLinks = state.dispenserLinks.filter((entry) => entry.panel === panelName);
+
+      if (panelLinks.length === 0) {
         await replyEphemeral(interaction, 'No links exist yet. Add links first with `/dispenser addlink`.');
         return;
       }
@@ -777,12 +835,83 @@ async function handleChatCommand(interaction) {
         .setTitle(title)
         .setDescription(description)
         .addFields(
-          { name: 'Available filters', value: String(getDispenserCategoryOptions('filter').filter((v) => v !== 'any').length), inline: true },
-          { name: 'Available types', value: String(getDispenserCategoryOptions('type').filter((v) => v !== 'any').length), inline: true },
+          { name: 'Available filters', value: String(getDispenserCategoryOptions(panelName, 'filter').filter((v) => v !== 'any').length), inline: true },
+          { name: 'Available types', value: String(getDispenserCategoryOptions(panelName, 'type').filter((v) => v !== 'any').length), inline: true },
         );
 
-      await interaction.channel.send({ embeds: [embed], components: buildDispenserPanelComponents() });
+      embed.addFields({ name: 'Panel', value: panelName, inline: false });
+
+      const panelMessage = await interaction.channel.send({ embeds: [embed], components: buildDispenserPanelComponents(panelName) });
+      state.dispenserPanelMessages[panelMessage.id] = panelName;
+      await saveState(state);
       await replyEphemeral(interaction, 'Dispenser panel posted.');
+      return;
+    }
+
+    if (subcommand === 'setlimit') {
+      const period = interaction.options.getString('period', true);
+      const limit = interaction.options.getInteger('limit', true);
+      const role = interaction.options.getRole('role');
+      const targetType = role ? 'role' : 'everyone';
+      const targetId = role ? role.id : null;
+
+      const existing = state.dispenserLimits.find(
+        (entry) => entry.panel === panelName && entry.period === period && entry.targetType === targetType && entry.targetId === targetId,
+      );
+
+      if (existing) {
+        existing.limit = limit;
+      } else {
+        state.dispenserLimits.push({
+          id: buildLimitId(),
+          panel: panelName,
+          period,
+          limit,
+          targetType,
+          targetId,
+          createdBy: interaction.user.id,
+        });
+      }
+
+      await saveState(state);
+      await replyEphemeral(interaction, `Set ${period} limit to ${limit} for ${role ? role.toString() : '@everyone'} in panel \`${panelName}\`.`);
+      return;
+    }
+
+    if (subcommand === 'removelimit') {
+      const period = interaction.options.getString('period', true);
+      const role = interaction.options.getRole('role');
+      const targetType = role ? 'role' : 'everyone';
+      const targetId = role ? role.id : null;
+      const previousLength = state.dispenserLimits.length;
+
+      state.dispenserLimits = state.dispenserLimits.filter(
+        (entry) => !(entry.panel === panelName && entry.period === period && entry.targetType === targetType && entry.targetId === targetId),
+      );
+
+      if (state.dispenserLimits.length === previousLength) {
+        await replyEphemeral(interaction, `No ${period} limit found for ${role ? role.toString() : '@everyone'} in panel \`${panelName}\`.`);
+        return;
+      }
+
+      await saveState(state);
+      await replyEphemeral(interaction, `Removed ${period} limit for ${role ? role.toString() : '@everyone'} in panel \`${panelName}\`.`);
+      return;
+    }
+
+    if (subcommand === 'listlimits') {
+      const panelLimits = state.dispenserLimits.filter((entry) => entry.panel === panelName);
+
+      if (panelLimits.length === 0) {
+        await replyEphemeral(interaction, 'No dispenser limits configured.');
+        return;
+      }
+
+      const lines = panelLimits
+        .map((entry) => `• ${entry.period}: ${entry.limit} for ${entry.targetType === 'everyone' ? '@everyone' : `<@&${entry.targetId}>`}`)
+        .join('\n');
+
+      await replyEphemeral(interaction, `Configured limits for \`${panelName}\`:\n${lines}`);
       return;
     }
   }
@@ -949,6 +1078,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return;
       }
 
+      const panelName = state.dispenserPanelMessages[interaction.message.id];
+      if (!panelName) {
+        await interaction.reply({ content: 'This dispenser panel is no longer configured.', flags: MessageFlags.Ephemeral });
+        return;
+      }
+
       const selectionKey = `${interaction.message.id}:${interaction.user.id}`;
       const current = dispenserSelections.get(selectionKey) ?? { filter: 'any', type: 'any' };
 
@@ -973,10 +1108,55 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
 
       if (interaction.customId === 'dispenser_dispense') {
+        if (!interaction.inGuild()) {
+          await interaction.reply({ content: 'This dispenser panel can only be used in a server.', flags: MessageFlags.Ephemeral });
+          return;
+        }
+
+        const panelName = state.dispenserPanelMessages[interaction.message.id];
+        if (!panelName) {
+          await interaction.reply({ content: 'This dispenser panel is no longer configured.', flags: MessageFlags.Ephemeral });
+          return;
+        }
+
         const selectionKey = `${interaction.message.id}:${interaction.user.id}`;
         const selected = dispenserSelections.get(selectionKey) ?? { filter: 'any', type: 'any' };
 
+        trimUsageHistory();
+
+        const applicableLimits = state.dispenserLimits.filter((entry) => {
+          if (entry.panel !== panelName) {
+            return false;
+          }
+
+          if (entry.targetType === 'everyone') {
+            return true;
+          }
+
+          if (entry.targetType === 'role') {
+            return interaction.member?.roles?.cache?.has?.(entry.targetId) ?? false;
+          }
+
+          return false;
+        });
+
+        for (const limitEntry of applicableLimits) {
+          const usage = getUsageCountForPeriod(interaction.user.id, panelName, limitEntry.period);
+
+          if (usage >= limitEntry.limit) {
+            await interaction.reply({
+              content: `You reached your ${limitEntry.period} dispenser limit (${limitEntry.limit}) for ${limitEntry.targetType === 'everyone' ? '@everyone' : `<@&${limitEntry.targetId}>`}.`,
+              flags: MessageFlags.Ephemeral,
+            });
+            return;
+          }
+        }
+
         const matches = state.dispenserLinks.filter((entry) => {
+          if (entry.panel !== panelName) {
+            return false;
+          }
+
           const filterMatch = selected.filter === 'any' || (entry.filters ?? []).includes(selected.filter);
           const typeMatch = selected.type === 'any' || entry.type === selected.type;
           return filterMatch && typeMatch;
@@ -991,6 +1171,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
         const chosen = matches[Math.floor(Math.random() * matches.length)];
+        state.dispenserUsage.push({ userId: interaction.user.id, panel: panelName, timestamp: Date.now() });
+        trimUsageHistory();
+        await saveState(state);
+
         await interaction.reply({
           content: `Here is your link (${(chosen.filters ?? []).join(', ')}/${chosen.type}): ${chosen.url}`,
           flags: MessageFlags.Ephemeral,
