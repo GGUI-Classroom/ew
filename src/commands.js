@@ -245,6 +245,11 @@ export const commandDefinitions = [
         .setName('listlimits')
         .setDescription('List configured dispenser limits for a panel.')
         .addStringOption((option) => option.setName('panel').setDescription('Panel name').setRequired(true).setMaxLength(50)),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('howto')
+        .setDescription('Show a quick step-by-step dispenser setup guide.'),
     ),
 ];
 

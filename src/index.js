@@ -671,6 +671,46 @@ async function handleChatCommand(interaction) {
     }
 
     const subcommand = interaction.options.getSubcommand(true);
+    if (subcommand === 'howto') {
+      const guideEmbed = new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle('Dispenser Setup Guide')
+        .setDescription('Quick setup flow for a named dispenser panel.')
+        .addFields(
+          {
+            name: '1. Pick a panel name',
+            value: 'Use one name consistently, e.g. `games` or `tools`.',
+          },
+          {
+            name: '2. Add links',
+            value: 'Use `/dispenser addlink panel:<name> url:<url> filter:<f1,f2> type:<type>`.',
+          },
+          {
+            name: '3. Bulk add links (optional)',
+            value: 'Use `/dispenser bulkadd panel:<name> filter:<...> type:<...> urls:<one per line>` or upload a `.txt` file.',
+          },
+          {
+            name: '4. Set limits (optional)',
+            value: 'Use `/dispenser setlimit panel:<name> period:<day|week|month> limit:<number> [role]`.',
+          },
+          {
+            name: '5. Post panel',
+            value: 'Use `/dispenser panel panel:<name> title:<optional> description:<optional>`.',
+          },
+          {
+            name: '6. Add or remove links later',
+            value: 'Use `/dispenser addlink`, `/dispenser bulkadd`, `/dispenser removelink`, and `/dispenser listlinks` with the same panel name.',
+          },
+          {
+            name: 'Important',
+            value: 'Every time you update links/filters/types for a panel, repost it with `/dispenser panel panel:<name> ...` so the live panel options are refreshed.',
+          },
+        );
+
+      await interaction.reply({ embeds: [guideEmbed], flags: MessageFlags.Ephemeral });
+      return;
+    }
+
     const panelName = normalizePanelName(interaction.options.getString('panel', true));
 
     if (!panelName) {
