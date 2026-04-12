@@ -658,6 +658,11 @@ async function handleChatCommand(interaction) {
         return;
       }
 
+      if (urls.length > 175) {
+        await replyEphemeral(interaction, `You can bulk add at most 175 links at once. You provided ${urls.length}.`);
+        return;
+      }
+
       let added = 0;
       let invalid = 0;
       let skipped = 0;
