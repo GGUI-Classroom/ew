@@ -37,6 +37,15 @@ state.adminRoleIds ??= [RELAY_ROLE_ID];
 state.adminUserIds ??= [];
 state.dispenserLinks ??= [];
 
+state.dispenserLinks = state.dispenserLinks.map((entry) => ({
+  ...entry,
+  filters: Array.isArray(entry.filters)
+    ? entry.filters.map((value) => normalizeCategory(String(value))).filter(Boolean)
+    : entry.filter
+      ? [normalizeCategory(String(entry.filter))]
+      : [],
+}));
+
 const dispenserSelections = new Map();
 
 const client = new Client({
@@ -78,6 +87,15 @@ function normalizeCategory(value) {
   return value.trim().toLowerCase();
 }
 
+function parseFilterList(raw) {
+  const filters = raw
+    .split(',')
+    .map((value) => normalizeCategory(value))
+    .filter(Boolean);
+
+  return [...new Set(filters)];
+}
+
 function buildLinkId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -110,7 +128,10 @@ function isBotAdmin(interaction) {
 }
 
 function getDispenserCategoryOptions(key) {
-  const values = [...new Set(state.dispenserLinks.map((entry) => entry[key]))].sort();
+  const values =
+    key === 'filter'
+      ? [...new Set(state.dispenserLinks.flatMap((entry) => entry.filters ?? []))].sort()
+      : [...new Set(state.dispenserLinks.map((entry) => entry[key]))].sort();
   return ['any', ...values].slice(0, 25);
 }
 
@@ -564,8 +585,13 @@ async function handleChatCommand(interaction) {
 
     if (subcommand === 'addlink') {
       const url = interaction.options.getString('url', true).trim();
-      const filter = normalizeCategory(interaction.options.getString('filter', true));
+      const filters = parseFilterList(interaction.options.getString('filter', true));
       const type = normalizeCategory(interaction.options.getString('type', true));
+
+      if (filters.length === 0) {
+        await replyEphemeral(interaction, 'Provide at least one filter. You can comma-separate multiple filters.');
+        return;
+      }
 
       try {
         new URL(url);
@@ -577,7 +603,7 @@ async function handleChatCommand(interaction) {
       const entry = {
         id: buildLinkId(),
         url,
-        filter,
+        filters,
         type,
         createdBy: interaction.user.id,
         createdAt: new Date().toISOString(),
@@ -586,7 +612,7 @@ async function handleChatCommand(interaction) {
       state.dispenserLinks.push(entry);
       await saveState(state);
 
-      await replyEphemeral(interaction, `Saved link \`${entry.id}\` for filter \`${filter}\` and type \`${type}\`.`);
+      await replyEphemeral(interaction, `Saved link \`${entry.id}\` for filters \`${filters.join(', ')}\` and type \`${type}\`.`);
       return;
     }
 
@@ -628,14 +654,18 @@ async function handleChatCommand(interaction) {
       const filter = filterOption ? normalizeCategory(filterOption) : null;
       const type = typeOption ? normalizeCategory(typeOption) : null;
 
-      const filtered = state.dispenserLinks.filter((entry) => (!filter || entry.filter === filter) && (!type || entry.type === type));
+      const filtered = state.dispenserLinks.filter((entry) => {
+        const filterMatch = !filter || (entry.filters ?? []).includes(filter);
+        const typeMatch = !type || entry.type === type;
+        return filterMatch && typeMatch;
+      });
 
       if (filtered.length === 0) {
         await replyEphemeral(interaction, 'No links found for that filter/type selection.');
         return;
       }
 
-      const preview = filtered.slice(0, 20).map((entry) => `• \`${entry.id}\` | ${entry.filter}/${entry.type} | ${entry.url}`);
+      const preview = filtered.slice(0, 20).map((entry) => `• \`${entry.id}\` | ${(entry.filters ?? []).join(', ')}/${entry.type} | ${entry.url}`);
       const suffix = filtered.length > 20 ? `\n...and ${filtered.length - 20} more.` : '';
       await replyEphemeral(interaction, `Stored links (${filtered.length}):\n${preview.join('\n')}${suffix}`);
       return;
@@ -654,8 +684,8 @@ async function handleChatCommand(interaction) {
         .setTitle(title)
         .setDescription(description)
         .addFields(
-          { name: 'Available filters', value: getDispenserCategoryOptions('filter').filter((v) => v !== 'any').join(', ') || 'None' },
-          { name: 'Available types', value: getDispenserCategoryOptions('type').filter((v) => v !== 'any').join(', ') || 'None' },
+          { name: 'Available filters', value: String(getDispenserCategoryOptions('filter').filter((v) => v !== 'any').length), inline: true },
+          { name: 'Available types', value: String(getDispenserCategoryOptions('type').filter((v) => v !== 'any').length), inline: true },
         );
 
       await interaction.channel.send({ embeds: [embed], components: buildDispenserPanelComponents() });
@@ -854,7 +884,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const selected = dispenserSelections.get(selectionKey) ?? { filter: 'any', type: 'any' };
 
         const matches = state.dispenserLinks.filter((entry) => {
-          const filterMatch = selected.filter === 'any' || entry.filter === selected.filter;
+          const filterMatch = selected.filter === 'any' || (entry.filters ?? []).includes(selected.filter);
           const typeMatch = selected.type === 'any' || entry.type === selected.type;
           return filterMatch && typeMatch;
         });
@@ -869,7 +899,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         const chosen = matches[Math.floor(Math.random() * matches.length)];
         await interaction.reply({
-          content: `Here is your link (${chosen.filter}/${chosen.type}): ${chosen.url}`,
+          content: `Here is your link (${(chosen.filters ?? []).join(', ')}/${chosen.type}): ${chosen.url}`,
           flags: MessageFlags.Ephemeral,
         });
         return;

@@ -137,7 +137,7 @@ export const commandDefinitions = [
         .setName('addlink')
         .setDescription('Add a link for a filter and type.')
         .addStringOption((option) => option.setName('url').setDescription('The URL to dispense').setRequired(true).setMaxLength(500))
-        .addStringOption((option) => option.setName('filter').setDescription('Filter category').setRequired(true).setMaxLength(50))
+        .addStringOption((option) => option.setName('filter').setDescription('Filter category (comma-separate for multiple)').setRequired(true).setMaxLength(200))
         .addStringOption((option) => option.setName('type').setDescription('Type category').setRequired(true).setMaxLength(50)),
     )
     .addSubcommand((subcommand) =>
