@@ -203,6 +203,12 @@ export const commandDefinitions = [
         .addSubcommand((subcommand) => subcommand.setName('status').setDescription('Show invite-link moderation rule status.')),
     ),
   new SlashCommandBuilder()
+    .setName('sendmessage')
+    .setDescription('Send a DM to any user.')
+    .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageMessages)
+    .addUserOption((option) => option.setName('user').setDescription('The user to message').setRequired(true))
+    .addStringOption((option) => option.setName('message').setDescription('Message to send').setRequired(true).setMaxLength(2000)),
+  new SlashCommandBuilder()
     .setName('admin')
     .setDescription('Manage bot-wide admin access by role or user id.')
     .addSubcommand((subcommand) =>

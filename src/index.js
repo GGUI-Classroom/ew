@@ -392,10 +392,12 @@ function buildRelayInviteEmbed(targetUser, invoker, note) {
 
 async function startRelay(guild, targetUser, invoker, note) {
   if (state.activeRelays[targetUser.id]) {
+    console.log(`[DM Relay] Relay already active for ${targetUser.tag} (${targetUser.id})`);
     return null;
   }
 
   const channel = await createRelayChannel(guild, targetUser, invoker);
+  console.log(`[DM Relay] Created relay channel ${channel.id} for ${targetUser.tag} (${targetUser.id})`);
 
   state.activeRelays[targetUser.id] = {
     channelId: channel.id,
@@ -404,6 +406,7 @@ async function startRelay(guild, targetUser, invoker, note) {
     startedAt: new Date().toISOString(),
   };
   await saveState(state);
+  console.log(`[DM Relay] Relay session started for ${targetUser.tag}. Active sessions: ${Object.keys(state.activeRelays).length}`);
 
   const embed = new EmbedBuilder()
     .setColor(0x57f287)
@@ -427,9 +430,11 @@ async function startRelay(guild, targetUser, invoker, note) {
 async function stopRelay(userId) {
   const session = state.activeRelays[userId];
   if (!session) {
+    console.log(`[DM Relay] No session found for user ${userId}`);
     return null;
   }
 
+  console.log(`[DM Relay] Stopping relay for user ${userId}`);
   const guild = await client.guilds.fetch(session.guildId).catch(() => null);
   const channel = guild ? await guild.channels.fetch(session.channelId).catch(() => null) : null;
 
@@ -440,6 +445,7 @@ async function stopRelay(userId) {
 
   delete state.activeRelays[userId];
   await saveState(state);
+  console.log(`[DM Relay] Relay stopped. Active sessions: ${Object.keys(state.activeRelays).length}`);
   return session;
 }
 
@@ -477,6 +483,7 @@ async function handleChatCommand(interaction) {
   const adminOnlyCommands = new Set([
     'admin',
     'moderationrule',
+    'sendmessage',
     'say',
     'poll',
     'dmconnect',
@@ -815,6 +822,20 @@ async function handleChatCommand(interaction) {
     }
 
     await replyEphemeral(interaction, 'Poll created.');
+    return;
+  }
+
+  if (interaction.commandName === 'sendmessage') {
+    const targetUser = interaction.options.getUser('user', true);
+    const message = interaction.options.getString('message', true);
+
+    if (targetUser.bot) {
+      await replyEphemeral(interaction, 'Cannot send messages to bots.');
+      return;
+    }
+
+    await targetUser.send({ content: message }).catch((err) => null);
+    await replyEphemeral(interaction, `Message sent to ${targetUser.tag}.`);
     return;
   }
 
@@ -1560,9 +1581,14 @@ client.on(Events.MessageCreate, async (message) => {
       }
 
       const [targetUserId] = relaySessionEntry;
-      const dmUser = await client.users.fetch(targetUserId).catch(() => null);
+      console.log(`[DM Relay] Forwarding guild message from ${message.author.tag} to DM user ${targetUserId}`);
+      const dmUser = await client.users.fetch(targetUserId).catch((err) => {
+        console.error(`[DM Relay] Failed to fetch DM user ${targetUserId}: ${err.message}`);
+        return null;
+      });
 
       if (!dmUser) {
+        console.error(`[DM Relay] Could not fetch user ${targetUserId}`);
         return;
       }
 
@@ -1572,20 +1598,31 @@ client.on(Events.MessageCreate, async (message) => {
         .setDescription(truncate(message.content?.trim() || '*No text content*', 4096))
         .setTimestamp(new Date());
 
-      await dmUser.send({ embeds: [embed] }).catch(() => null);
+      await dmUser.send({ embeds: [embed] }).catch((err) => {
+        console.error(`[DM Relay] Failed to send DM to ${dmUser.tag}: ${err.message}`);
+      });
       return;
     }
 
     const userRelaySession = state.activeRelays[message.author.id];
 
     if (!userRelaySession) {
+      console.log(`[DM Relay] No relay session for DM user ${message.author.tag} (${message.author.id}). Active sessions: ${Object.keys(state.activeRelays).join(', ')}`);
       return;
     }
 
-    const guild = await client.guilds.fetch(userRelaySession.guildId).catch(() => null);
-    const channel = guild ? await guild.channels.fetch(userRelaySession.channelId).catch(() => null) : null;
+    console.log(`[DM Relay] Forwarding DM from ${message.author.tag} to relay channel ${userRelaySession.channelId}`);
+    const guild = await client.guilds.fetch(userRelaySession.guildId).catch((err) => {
+      console.error(`[DM Relay] Failed to fetch guild ${userRelaySession.guildId}: ${err.message}`);
+      return null;
+    });
+    const channel = guild ? await guild.channels.fetch(userRelaySession.channelId).catch((err) => {
+      console.error(`[DM Relay] Failed to fetch channel ${userRelaySession.channelId}: ${err.message}`);
+      return null;
+    }) : null;
 
     if (!channel || !channel.isTextBased()) {
+      console.error(`[DM Relay] Channel ${userRelaySession.channelId} not found or not text-based`);
       return;
     }
 
@@ -1595,7 +1632,10 @@ client.on(Events.MessageCreate, async (message) => {
       .setDescription(truncate(message.content?.trim() || '*No text content*', 4096))
       .setTimestamp(new Date());
 
-    await channel.send({ embeds: [embed] }).catch(() => null);
+    await channel.send({ embeds: [embed] }).catch((err) => {
+      console.error(`[DM Relay] Failed to send message to relay channel: ${err.message}`);
+    });
+    console.log(`[DM Relay] Successfully forwarded DM to relay channel`);
   } catch (error) {
     console.error('Message relay failed:', error);
   }
