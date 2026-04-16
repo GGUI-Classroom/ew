@@ -13,6 +13,7 @@ const defaultState = {
   dispenserLimits: [],
   dispenserUsage: [],
   dispenserPanelMessages: {},
+  moderationRules: {},
 };
 
 export async function loadState() {
@@ -33,6 +34,7 @@ export async function loadState() {
       dispenserLimits: parsedState.dispenserLimits ?? [],
       dispenserUsage: parsedState.dispenserUsage ?? [],
       dispenserPanelMessages: parsedState.dispenserPanelMessages ?? {},
+      moderationRules: parsedState.moderationRules ?? {},
     };
   } catch (error) {
     if (error?.code !== 'ENOENT') {

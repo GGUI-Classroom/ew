@@ -101,6 +101,50 @@ export const commandDefinitions = [
     .addStringOption((option) => option.setName('label').setDescription('Button label').setRequired(false).setMaxLength(80))
     .addStringOption((option) => option.setName('emoji').setDescription('Optional emoji').setRequired(false).setMaxLength(20)),
   new SlashCommandBuilder()
+    .setName('moderationrule')
+    .setDescription('Manage server moderation rules.')
+    .addSubcommandGroup((group) =>
+      group
+        .setName('noticket')
+        .setDescription('Invite link moderation rule.')
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('enable')
+            .setDescription('Enable invite-link warnings and 1 minute timeouts.'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('disable')
+            .setDescription('Disable invite-link warnings and 1 minute timeouts.'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('bypass')
+            .setDescription('Add a channel bypass for invite-link moderation.')
+            .addChannelOption((option) =>
+              option
+                .setName('channel')
+                .setDescription('Channel to bypass')
+                .setRequired(true)
+                .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement, ChannelType.GuildForum),
+            ),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('unbypass')
+            .setDescription('Remove a channel bypass for invite-link moderation.')
+            .addChannelOption((option) =>
+              option
+                .setName('channel')
+                .setDescription('Channel to remove from bypass list')
+                .setRequired(true)
+                .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement, ChannelType.GuildForum),
+            ),
+        )
+        .addSubcommand((subcommand) => subcommand.setName('bypasslist').setDescription('List bypassed channels.'))
+        .addSubcommand((subcommand) => subcommand.setName('status').setDescription('Show invite-link moderation rule status.')),
+    ),
+  new SlashCommandBuilder()
     .setName('admin')
     .setDescription('Manage bot-wide admin access by role or user id.')
     .addSubcommand((subcommand) =>

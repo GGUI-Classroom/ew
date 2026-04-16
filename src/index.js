@@ -42,6 +42,7 @@ state.dispenserLinks ??= [];
 state.dispenserLimits ??= [];
 state.dispenserUsage ??= [];
 state.dispenserPanelMessages ??= {};
+state.moderationRules ??= {};
 
 state.dispenserLinks = state.dispenserLinks.map((entry) => ({
   ...entry,
@@ -116,6 +117,28 @@ function parseFilterList(raw) {
 
 function normalizePanelName(raw) {
   return normalizeCategory(raw).slice(0, 50);
+}
+
+function getGuildModerationRule(guildId) {
+  state.moderationRules[guildId] ??= {
+    noticket: {
+      enabled: false,
+      bypassChannelIds: [],
+    },
+  };
+
+  state.moderationRules[guildId].noticket ??= {
+    enabled: false,
+    bypassChannelIds: [],
+  };
+
+  state.moderationRules[guildId].noticket.bypassChannelIds ??= [];
+
+  return state.moderationRules[guildId];
+}
+
+function isInviteLinkMessage(content) {
+  return /(?:https?:\/\/)?(?:www\.)?(?:discord\.gg\/[\w-]+|discord(?:app)?\.com\/invite\/[\w-]+)/i.test(content);
 }
 
 function getHostnameSafe(url) {
@@ -420,6 +443,7 @@ async function handleReactionRoleButton(interaction) {
 async function handleChatCommand(interaction) {
   const adminOnlyCommands = new Set([
     'admin',
+    'moderationrule',
     'say',
     'poll',
     'dmconnect',
@@ -458,7 +482,7 @@ async function handleChatCommand(interaction) {
       .addFields(
         { name: 'General', value: '`/ping` `/about` `/help` `/serverinfo` `/userinfo` `/avatar`' },
         { name: 'Utility', value: '`/say` `/poll`' },
-        { name: 'Moderation', value: '`/ban` `/kick` `/timeout` `/untimeout` `/purge` `/warn` `/warnings`' },
+        { name: 'Moderation', value: '`/ban` `/kick` `/timeout` `/untimeout` `/purge` `/warn` `/warnings` `/moderationrule`' },
         { name: 'DM Link', value: '`/dmconnect` `/dmend` `/dmstatus`' },
         { name: 'Reaction Roles', value: '`/reactionrole`' },
         { name: 'Global Admin', value: '`/admin addrole|removerole|listroles|adduser|removeuser|listusers`' },
@@ -529,6 +553,76 @@ async function handleChatCommand(interaction) {
       }
 
       await replyEphemeral(interaction, `Bot admin users:\n${state.adminUserIds.map((id) => `- <@${id}>`).join('\n')}`);
+      return;
+    }
+  }
+
+  if (interaction.commandName === 'moderationrule') {
+    if (!interaction.guild) {
+      await replyEphemeral(interaction, 'This command only works in a server.');
+      return;
+    }
+
+    const group = interaction.options.getSubcommandGroup(true);
+    const subcommand = interaction.options.getSubcommand(true);
+
+    if (group !== 'noticket') {
+      await replyEphemeral(interaction, 'Unknown moderation rule group.');
+      return;
+    }
+
+    const guildRule = getGuildModerationRule(interaction.guildId);
+    const noticketRule = guildRule.noticket;
+
+    if (subcommand === 'enable') {
+      noticketRule.enabled = true;
+      await saveState(state);
+      await replyEphemeral(interaction, 'Invite-link moderation is now enabled.');
+      return;
+    }
+
+    if (subcommand === 'disable') {
+      noticketRule.enabled = false;
+      await saveState(state);
+      await replyEphemeral(interaction, 'Invite-link moderation is now disabled.');
+      return;
+    }
+
+    if (subcommand === 'bypass') {
+      const channel = interaction.options.getChannel('channel', true);
+
+      if (!noticketRule.bypassChannelIds.includes(channel.id)) {
+        noticketRule.bypassChannelIds.push(channel.id);
+        await saveState(state);
+      }
+
+      await replyEphemeral(interaction, `${channel} is now bypassed for invite-link moderation.`);
+      return;
+    }
+
+    if (subcommand === 'unbypass') {
+      const channel = interaction.options.getChannel('channel', true);
+      noticketRule.bypassChannelIds = noticketRule.bypassChannelIds.filter((id) => id !== channel.id);
+      await saveState(state);
+      await replyEphemeral(interaction, `${channel} is no longer bypassed for invite-link moderation.`);
+      return;
+    }
+
+    if (subcommand === 'bypasslist') {
+      if (noticketRule.bypassChannelIds.length === 0) {
+        await replyEphemeral(interaction, 'No bypass channels are configured for invite-link moderation.');
+        return;
+      }
+
+      const lines = noticketRule.bypassChannelIds.map((id) => `<#${id}>`).join('\n');
+      await replyEphemeral(interaction, `Bypass channels for invite-link moderation:\n${lines}`);
+      return;
+    }
+
+    if (subcommand === 'status') {
+      const status = noticketRule.enabled ? 'enabled' : 'disabled';
+      const bypasses = noticketRule.bypassChannelIds.length === 0 ? 'none' : noticketRule.bypassChannelIds.map((id) => `<#${id}>`).join(', ');
+      await replyEphemeral(interaction, `Invite-link moderation is **${status}**. Bypasses: ${bypasses}.`);
       return;
     }
   }
@@ -1314,6 +1408,22 @@ client.on(Events.MessageCreate, async (message) => {
     }
 
     if (message.guild) {
+      const guildRule = state.moderationRules[message.guild.id]?.noticket;
+      if (guildRule?.enabled && !guildRule.bypassChannelIds.includes(message.channelId) && isInviteLinkMessage(message.content ?? '')) {
+        const member = message.member ?? (await message.guild.members.fetch(message.author.id).catch(() => null));
+
+        await message.reply({
+          content: 'Do not send invite links here.',
+          allowedMentions: { repliedUser: false },
+        }).catch(() => null);
+
+        if (member) {
+          await member.timeout(60_000, 'Sent a Discord invite link').catch(() => null);
+        }
+
+        return;
+      }
+
       const relaySessionEntry = findRelaySessionByChannelId(message.channelId);
 
       if (!relaySessionEntry) {
