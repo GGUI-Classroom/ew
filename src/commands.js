@@ -165,6 +165,18 @@ export const commandDefinitions = [
         )
         .addSubcommand((subcommand) =>
           subcommand
+            .setName('message')
+            .setDescription('Set the warning message sent for noinvite violations.')
+            .addStringOption((option) =>
+              option
+                .setName('message')
+                .setDescription('Message to send when a user posts an invite link')
+                .setRequired(true)
+                .setMaxLength(400),
+            ),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
             .setName('bypass')
             .setDescription('Add a channel bypass for invite-link moderation.')
             .addChannelOption((option) =>

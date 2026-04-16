@@ -136,6 +136,7 @@ function getGuildModerationRule(guildId) {
   state.moderationRules[guildId].noinvite ??= {
     enabled: false,
     bypassChannelIds: [],
+    warningMessage: 'Do not send invite links here.',
     timeout: {
       enabled: true,
       durationMs: NOINVITE_TIMEOUT_DEFAULT_MS,
@@ -147,6 +148,7 @@ function getGuildModerationRule(guildId) {
   };
 
   state.moderationRules[guildId].noinvite.bypassChannelIds ??= [];
+  state.moderationRules[guildId].noinvite.warningMessage ??= 'Do not send invite links here.';
   state.moderationRules[guildId].noinvite.timeout ??= {
     enabled: true,
     durationMs: NOINVITE_TIMEOUT_DEFAULT_MS,
@@ -676,6 +678,20 @@ async function handleChatCommand(interaction) {
       }
     }
 
+    if (subcommand === 'message') {
+      const warningMessage = interaction.options.getString('message', true).trim();
+
+      if (!warningMessage) {
+        await replyEphemeral(interaction, 'Warning message cannot be empty.');
+        return;
+      }
+
+      noinviteRule.warningMessage = warningMessage;
+      await saveState(state);
+      await replyEphemeral(interaction, `Noinvite warning message updated to:\n${warningMessage}`);
+      return;
+    }
+
     if (subcommand === 'bypass') {
       const channel = interaction.options.getChannel('channel', true);
 
@@ -714,7 +730,7 @@ async function handleChatCommand(interaction) {
       const reportsStatus = noinviteRule.reports.enabled
         ? `enabled in <#${noinviteRule.reports.channelId}>`
         : 'disabled';
-      await replyEphemeral(interaction, `Invite-link moderation is **${status}**. Timeout: **${timeoutStatus}**. Reports: **${reportsStatus}**. Bypasses: ${bypasses}.`);
+      await replyEphemeral(interaction, `Invite-link moderation is **${status}**. Timeout: **${timeoutStatus}**. Reports: **${reportsStatus}**. Bypasses: ${bypasses}. Message: "${noinviteRule.warningMessage}".`);
       return;
     }
   }
@@ -1506,7 +1522,7 @@ client.on(Events.MessageCreate, async (message) => {
         const member = message.member ?? (await message.guild.members.fetch(message.author.id).catch(() => null));
 
         await message.reply({
-          content: 'Do not send invite links here.',
+          content: guildRule.warningMessage,
           allowedMentions: { repliedUser: false },
         }).catch(() => null);
 
