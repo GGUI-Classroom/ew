@@ -120,19 +120,19 @@ function normalizePanelName(raw) {
 }
 
 function getGuildModerationRule(guildId) {
-  state.moderationRules[guildId] ??= {
-    noticket: {
-      enabled: false,
-      bypassChannelIds: [],
-    },
-  };
+  state.moderationRules[guildId] ??= {};
 
-  state.moderationRules[guildId].noticket ??= {
+  if (state.moderationRules[guildId].noticket && !state.moderationRules[guildId].noinvite) {
+    state.moderationRules[guildId].noinvite = state.moderationRules[guildId].noticket;
+    delete state.moderationRules[guildId].noticket;
+  }
+
+  state.moderationRules[guildId].noinvite ??= {
     enabled: false,
     bypassChannelIds: [],
   };
 
-  state.moderationRules[guildId].noticket.bypassChannelIds ??= [];
+  state.moderationRules[guildId].noinvite.bypassChannelIds ??= [];
 
   return state.moderationRules[guildId];
 }
@@ -566,23 +566,23 @@ async function handleChatCommand(interaction) {
     const group = interaction.options.getSubcommandGroup(true);
     const subcommand = interaction.options.getSubcommand(true);
 
-    if (group !== 'noticket') {
+    if (group !== 'noinvite') {
       await replyEphemeral(interaction, 'Unknown moderation rule group.');
       return;
     }
 
     const guildRule = getGuildModerationRule(interaction.guildId);
-    const noticketRule = guildRule.noticket;
+    const noinviteRule = guildRule.noinvite;
 
     if (subcommand === 'enable') {
-      noticketRule.enabled = true;
+      noinviteRule.enabled = true;
       await saveState(state);
       await replyEphemeral(interaction, 'Invite-link moderation is now enabled.');
       return;
     }
 
     if (subcommand === 'disable') {
-      noticketRule.enabled = false;
+      noinviteRule.enabled = false;
       await saveState(state);
       await replyEphemeral(interaction, 'Invite-link moderation is now disabled.');
       return;
@@ -591,8 +591,8 @@ async function handleChatCommand(interaction) {
     if (subcommand === 'bypass') {
       const channel = interaction.options.getChannel('channel', true);
 
-      if (!noticketRule.bypassChannelIds.includes(channel.id)) {
-        noticketRule.bypassChannelIds.push(channel.id);
+      if (!noinviteRule.bypassChannelIds.includes(channel.id)) {
+        noinviteRule.bypassChannelIds.push(channel.id);
         await saveState(state);
       }
 
@@ -602,26 +602,26 @@ async function handleChatCommand(interaction) {
 
     if (subcommand === 'unbypass') {
       const channel = interaction.options.getChannel('channel', true);
-      noticketRule.bypassChannelIds = noticketRule.bypassChannelIds.filter((id) => id !== channel.id);
+      noinviteRule.bypassChannelIds = noinviteRule.bypassChannelIds.filter((id) => id !== channel.id);
       await saveState(state);
       await replyEphemeral(interaction, `${channel} is no longer bypassed for invite-link moderation.`);
       return;
     }
 
     if (subcommand === 'bypasslist') {
-      if (noticketRule.bypassChannelIds.length === 0) {
+      if (noinviteRule.bypassChannelIds.length === 0) {
         await replyEphemeral(interaction, 'No bypass channels are configured for invite-link moderation.');
         return;
       }
 
-      const lines = noticketRule.bypassChannelIds.map((id) => `<#${id}>`).join('\n');
+      const lines = noinviteRule.bypassChannelIds.map((id) => `<#${id}>`).join('\n');
       await replyEphemeral(interaction, `Bypass channels for invite-link moderation:\n${lines}`);
       return;
     }
 
     if (subcommand === 'status') {
-      const status = noticketRule.enabled ? 'enabled' : 'disabled';
-      const bypasses = noticketRule.bypassChannelIds.length === 0 ? 'none' : noticketRule.bypassChannelIds.map((id) => `<#${id}>`).join(', ');
+      const status = noinviteRule.enabled ? 'enabled' : 'disabled';
+      const bypasses = noinviteRule.bypassChannelIds.length === 0 ? 'none' : noinviteRule.bypassChannelIds.map((id) => `<#${id}>`).join(', ');
       await replyEphemeral(interaction, `Invite-link moderation is **${status}**. Bypasses: ${bypasses}.`);
       return;
     }
@@ -1408,7 +1408,7 @@ client.on(Events.MessageCreate, async (message) => {
     }
 
     if (message.guild) {
-      const guildRule = state.moderationRules[message.guild.id]?.noticket;
+      const guildRule = state.moderationRules[message.guild.id]?.noinvite ?? state.moderationRules[message.guild.id]?.noticket;
       if (guildRule?.enabled && !guildRule.bypassChannelIds.includes(message.channelId) && isInviteLinkMessage(message.content ?? '')) {
         const member = message.member ?? (await message.guild.members.fetch(message.author.id).catch(() => null));
 

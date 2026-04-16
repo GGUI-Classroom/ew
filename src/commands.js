@@ -105,7 +105,7 @@ export const commandDefinitions = [
     .setDescription('Manage server moderation rules.')
     .addSubcommandGroup((group) =>
       group
-        .setName('noticket')
+        .setName('noinvite')
         .setDescription('Invite link moderation rule.')
         .addSubcommand((subcommand) =>
           subcommand
