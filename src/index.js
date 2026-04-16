@@ -23,6 +23,7 @@ const port = Number(process.env.PORT || 0);
 const RELAY_ROLE_ID = '1492370989399543808';
 const PRESENCE_ROTATION_MS = 10000;
 const MAX_TIMEOUT_MS = 28 * 24 * 60 * 60 * 1000;
+const NOINVITE_TIMEOUT_DEFAULT_MS = 60_000;
 const PERIOD_MS = {
   day: 24 * 60 * 60 * 1000,
   week: 7 * 24 * 60 * 60 * 1000,
@@ -119,6 +120,11 @@ function normalizePanelName(raw) {
   return normalizeCategory(raw).slice(0, 50);
 }
 
+function formatDurationMinutes(ms) {
+  const minutes = Math.max(1, Math.round(ms / 60_000));
+  return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+}
+
 function getGuildModerationRule(guildId) {
   state.moderationRules[guildId] ??= {};
 
@@ -130,9 +136,34 @@ function getGuildModerationRule(guildId) {
   state.moderationRules[guildId].noinvite ??= {
     enabled: false,
     bypassChannelIds: [],
+    timeout: {
+      enabled: true,
+      durationMs: NOINVITE_TIMEOUT_DEFAULT_MS,
+    },
+    reports: {
+      enabled: false,
+      channelId: null,
+    },
   };
 
   state.moderationRules[guildId].noinvite.bypassChannelIds ??= [];
+  state.moderationRules[guildId].noinvite.timeout ??= {
+    enabled: true,
+    durationMs: NOINVITE_TIMEOUT_DEFAULT_MS,
+  };
+  state.moderationRules[guildId].noinvite.timeout.enabled ??= true;
+
+  const timeoutDuration = Number(state.moderationRules[guildId].noinvite.timeout.durationMs);
+  if (!Number.isFinite(timeoutDuration) || timeoutDuration < 60_000 || timeoutDuration > MAX_TIMEOUT_MS) {
+    state.moderationRules[guildId].noinvite.timeout.durationMs = NOINVITE_TIMEOUT_DEFAULT_MS;
+  }
+
+  state.moderationRules[guildId].noinvite.reports ??= {
+    enabled: false,
+    channelId: null,
+  };
+  state.moderationRules[guildId].noinvite.reports.enabled ??= false;
+  state.moderationRules[guildId].noinvite.reports.channelId ??= null;
 
   return state.moderationRules[guildId];
 }
@@ -588,6 +619,63 @@ async function handleChatCommand(interaction) {
       return;
     }
 
+    if (subcommand === 'timeout') {
+      const action = interaction.options.getString('action', true);
+
+      if (action === 'enable') {
+        noinviteRule.timeout.enabled = true;
+        await saveState(state);
+        await replyEphemeral(interaction, `Noinvite timeout is now enabled (${formatDurationMinutes(noinviteRule.timeout.durationMs)}).`);
+        return;
+      }
+
+      if (action === 'disable') {
+        noinviteRule.timeout.enabled = false;
+        await saveState(state);
+        await replyEphemeral(interaction, 'Noinvite timeout is now disabled.');
+        return;
+      }
+
+      if (action === 'edittime') {
+        const minutes = interaction.options.getInteger('minutes');
+
+        if (!minutes) {
+          await replyEphemeral(interaction, 'You must provide `minutes` when using timeout action `edittime`.');
+          return;
+        }
+
+        noinviteRule.timeout.durationMs = Math.min(minutes * 60_000, MAX_TIMEOUT_MS);
+        await saveState(state);
+        await replyEphemeral(interaction, `Noinvite timeout duration set to ${formatDurationMinutes(noinviteRule.timeout.durationMs)}.`);
+        return;
+      }
+    }
+
+    if (subcommand === 'reports') {
+      const action = interaction.options.getString('action', true);
+      const channel = interaction.options.getChannel('channel');
+
+      if (action === 'enable') {
+        if (!channel || !channel.isTextBased()) {
+          await replyEphemeral(interaction, 'Provide a valid text channel when enabling reports.');
+          return;
+        }
+
+        noinviteRule.reports.enabled = true;
+        noinviteRule.reports.channelId = channel.id;
+        await saveState(state);
+        await replyEphemeral(interaction, `Noinvite reports enabled in ${channel}.`);
+        return;
+      }
+
+      if (action === 'disable') {
+        noinviteRule.reports.enabled = false;
+        await saveState(state);
+        await replyEphemeral(interaction, 'Noinvite reports are now disabled.');
+        return;
+      }
+    }
+
     if (subcommand === 'bypass') {
       const channel = interaction.options.getChannel('channel', true);
 
@@ -622,7 +710,11 @@ async function handleChatCommand(interaction) {
     if (subcommand === 'status') {
       const status = noinviteRule.enabled ? 'enabled' : 'disabled';
       const bypasses = noinviteRule.bypassChannelIds.length === 0 ? 'none' : noinviteRule.bypassChannelIds.map((id) => `<#${id}>`).join(', ');
-      await replyEphemeral(interaction, `Invite-link moderation is **${status}**. Bypasses: ${bypasses}.`);
+      const timeoutStatus = noinviteRule.timeout.enabled ? `enabled (${formatDurationMinutes(noinviteRule.timeout.durationMs)})` : 'disabled';
+      const reportsStatus = noinviteRule.reports.enabled
+        ? `enabled in <#${noinviteRule.reports.channelId}>`
+        : 'disabled';
+      await replyEphemeral(interaction, `Invite-link moderation is **${status}**. Timeout: **${timeoutStatus}**. Reports: **${reportsStatus}**. Bypasses: ${bypasses}.`);
       return;
     }
   }
@@ -1408,8 +1500,9 @@ client.on(Events.MessageCreate, async (message) => {
     }
 
     if (message.guild) {
-      const guildRule = state.moderationRules[message.guild.id]?.noinvite ?? state.moderationRules[message.guild.id]?.noticket;
-      if (guildRule?.enabled && !guildRule.bypassChannelIds.includes(message.channelId) && isInviteLinkMessage(message.content ?? '')) {
+      const guildRuleWrapper = getGuildModerationRule(message.guild.id);
+      const guildRule = guildRuleWrapper.noinvite;
+      if (guildRule.enabled && !guildRule.bypassChannelIds.includes(message.channelId) && isInviteLinkMessage(message.content ?? '')) {
         const member = message.member ?? (await message.guild.members.fetch(message.author.id).catch(() => null));
 
         await message.reply({
@@ -1417,8 +1510,28 @@ client.on(Events.MessageCreate, async (message) => {
           allowedMentions: { repliedUser: false },
         }).catch(() => null);
 
-        if (member) {
-          await member.timeout(60_000, 'Sent a Discord invite link').catch(() => null);
+        if (member && guildRule.timeout.enabled) {
+          await member.timeout(guildRule.timeout.durationMs, 'Sent a Discord invite link').catch(() => null);
+        }
+
+        if (guildRule.reports.enabled && guildRule.reports.channelId) {
+          const reportChannel = message.guild.channels.cache.get(guildRule.reports.channelId)
+            ?? (await message.guild.channels.fetch(guildRule.reports.channelId).catch(() => null));
+
+          if (reportChannel?.isTextBased()) {
+            const reportEmbed = new EmbedBuilder()
+              .setColor(0xe74c3c)
+              .setTitle('Noinvite Rule Triggered')
+              .addFields(
+                { name: 'User', value: `${message.author} (${message.author.tag})`, inline: false },
+                { name: 'Channel', value: `<#${message.channelId}>`, inline: true },
+                { name: 'Timeout Applied', value: guildRule.timeout.enabled ? formatDurationMinutes(guildRule.timeout.durationMs) : 'No', inline: true },
+              )
+              .setDescription(truncate(message.content?.trim() || '*No text content*', 1000))
+              .setTimestamp(new Date());
+
+            await reportChannel.send({ embeds: [reportEmbed] }).catch(() => null);
+          }
         }
 
         return;

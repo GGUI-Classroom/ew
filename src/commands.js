@@ -119,6 +119,52 @@ export const commandDefinitions = [
         )
         .addSubcommand((subcommand) =>
           subcommand
+            .setName('timeout')
+            .setDescription('Configure timeout behavior for noinvite violations.')
+            .addStringOption((option) =>
+              option
+                .setName('action')
+                .setDescription('Enable, disable, or edit timeout duration')
+                .setRequired(true)
+                .addChoices(
+                  { name: 'enable', value: 'enable' },
+                  { name: 'disable', value: 'disable' },
+                  { name: 'edittime', value: 'edittime' },
+                ),
+            )
+            .addIntegerOption((option) =>
+              option
+                .setName('minutes')
+                .setDescription('Required for edittime: timeout length in minutes')
+                .setRequired(false)
+                .setMinValue(1)
+                .setMaxValue(40320),
+            ),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('reports')
+            .setDescription('Configure noinvite violation reports.')
+            .addStringOption((option) =>
+              option
+                .setName('action')
+                .setDescription('Enable or disable reports')
+                .setRequired(true)
+                .addChoices(
+                  { name: 'enable', value: 'enable' },
+                  { name: 'disable', value: 'disable' },
+                ),
+            )
+            .addChannelOption((option) =>
+              option
+                .setName('channel')
+                .setDescription('Required when enabling reports')
+                .setRequired(false)
+                .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement),
+            ),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
             .setName('bypass')
             .setDescription('Add a channel bypass for invite-link moderation.')
             .addChannelOption((option) =>
