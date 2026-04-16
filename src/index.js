@@ -1505,7 +1505,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       const guild = await client.guilds.fetch(guildId).catch(() => null);
       if (!guild) {
-        await replyEphemeral(interaction, 'Guild not found.');
+        await interaction.update({ content: 'Guild not found.', components: [] }).catch(() => null);
         return;
       }
 
@@ -1513,11 +1513,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const channel = await startRelay(guild, interaction.user, invoker ?? { id: requesterId, tag: 'Unknown' }, null);
 
       if (!channel) {
-        await interaction.update({ content: 'A DM connection is already active for you.', components: [] });
+        await interaction.update({ content: 'A DM connection is already active for you.', components: [] }).catch(() => null);
         return;
       }
 
-      await interaction.update({ content: `DM connection accepted. Channel created in **${guild.name}**.`, components: [] });
+      await interaction.update({ content: `DM connection accepted. Channel created in **${guild.name}**.`, components: [] }).catch(() => null);
       return;
     }
 
@@ -1577,6 +1577,7 @@ client.on(Events.MessageCreate, async (message) => {
       const relaySessionEntry = findRelaySessionByChannelId(message.channelId);
 
       if (!relaySessionEntry) {
+        console.log(`[DM Relay] Message in channel ${message.channelId}, but not a relay channel. Checking active relays: ${Object.keys(state.activeRelays).map((id) => `${id}=${state.activeRelays[id].channelId}`).join(', ')}`);
         return;
       }
 
