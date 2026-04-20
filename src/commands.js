@@ -313,9 +313,9 @@ export const commandDefinitions = [
         .addIntegerOption((option) =>
           option
             .setName('limit')
-            .setDescription('Max links per user for this period')
+            .setDescription('Max links per user for this period (0 disables for @everyone)')
             .setRequired(true)
-            .setMinValue(1)
+            .setMinValue(0)
             .setMaxValue(5000),
         )
         .addRoleOption((option) =>

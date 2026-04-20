@@ -1434,21 +1434,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         trimUsageHistory();
 
-        const applicableLimits = state.dispenserLimits.filter((entry) => {
-          if (entry.panel !== panelName) {
+        const roleLimits = state.dispenserLimits.filter((entry) => {
+          if (entry.panel !== panelName || entry.targetType !== 'role') {
             return false;
           }
 
-          if (entry.targetType === 'everyone') {
-            return true;
-          }
-
-          if (entry.targetType === 'role') {
-            return interaction.member?.roles?.cache?.has?.(entry.targetId) ?? false;
-          }
-
-          return false;
+          return interaction.member?.roles?.cache?.has?.(entry.targetId) ?? false;
         });
+
+        const everyoneLimit = state.dispenserLimits.find(
+          (entry) => entry.panel === panelName && entry.targetType === 'everyone',
+        );
+
+        const applicableLimits = roleLimits.length > 0 ? roleLimits : everyoneLimit ? [everyoneLimit] : [];
 
         for (const limitEntry of applicableLimits) {
           const usage = getUsageCountForPeriod(interaction.user.id, panelName, limitEntry.period);
