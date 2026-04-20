@@ -1446,14 +1446,31 @@ client.on(Events.InteractionCreate, async (interaction) => {
           (entry) => entry.panel === panelName && entry.targetType === 'everyone',
         );
 
-        const applicableLimits = roleLimits.length > 0 ? roleLimits : everyoneLimit ? [everyoneLimit] : [];
+        const effectiveLimits = new Map();
 
-        for (const limitEntry of applicableLimits) {
-          const usage = getUsageCountForPeriod(interaction.user.id, panelName, limitEntry.period);
+        for (const limitEntry of roleLimits) {
+          const current = effectiveLimits.get(limitEntry.period);
+          if (!current || Number(limitEntry.limit) > current.limit) {
+            effectiveLimits.set(limitEntry.period, {
+              limit: Number(limitEntry.limit),
+              source: `<@&${limitEntry.targetId}>`,
+            });
+          }
+        }
 
-          if (usage >= limitEntry.limit) {
+        if (effectiveLimits.size === 0 && everyoneLimit) {
+          effectiveLimits.set(everyoneLimit.period, {
+            limit: Number(everyoneLimit.limit),
+            source: '@everyone',
+          });
+        }
+
+        for (const [period, limitInfo] of effectiveLimits.entries()) {
+          const usage = getUsageCountForPeriod(interaction.user.id, panelName, period);
+
+          if (usage >= limitInfo.limit) {
             await interaction.reply({
-              content: `You reached your ${limitEntry.period} dispenser limit (${limitEntry.limit}) for ${limitEntry.targetType === 'everyone' ? '@everyone' : `<@&${limitEntry.targetId}>`}.`,
+              content: `You reached your ${period} dispenser limit (${limitInfo.limit}) for ${limitInfo.source}.`,
               flags: MessageFlags.Ephemeral,
             });
             return;
