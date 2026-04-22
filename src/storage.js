@@ -1,8 +1,12 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const dataDirectory = path.join(process.cwd(), 'data');
+const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
+const dataDirectory = path.resolve(moduleDirectory, '..', 'data');
+const legacyDataDirectory = path.join(process.cwd(), 'data');
 const stateFile = path.join(dataDirectory, 'state.json');
+const legacyStateFile = path.join(legacyDataDirectory, 'state.json');
 const defaultState = {
   activeRelays: {},
   bannedUsers: [],
@@ -20,9 +24,20 @@ export async function loadState() {
   await mkdir(dataDirectory, { recursive: true });
 
   try {
-    const rawState = await readFile(stateFile, 'utf8');
+    let rawState;
+
+    try {
+      rawState = await readFile(stateFile, 'utf8');
+    } catch (error) {
+      if (error?.code !== 'ENOENT' || legacyStateFile === stateFile) {
+        throw error;
+      }
+
+      rawState = await readFile(legacyStateFile, 'utf8');
+    }
+
     const parsedState = JSON.parse(rawState);
-    return {
+    const normalizedState = {
       ...defaultState,
       ...parsedState,
       activeRelays: parsedState.activeRelays ?? {},
@@ -36,6 +51,9 @@ export async function loadState() {
       dispenserPanelMessages: parsedState.dispenserPanelMessages ?? {},
       moderationRules: parsedState.moderationRules ?? {},
     };
+
+    await saveState(normalizedState);
+    return normalizedState;
   } catch (error) {
     if (error?.code !== 'ENOENT') {
       throw error;
