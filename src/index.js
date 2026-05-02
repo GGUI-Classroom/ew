@@ -263,7 +263,8 @@ function getDispenserCategoryOptions(panelName, key) {
     key === 'filter'
       ? [...new Set(panelLinks.flatMap((entry) => entry.filters ?? []))].sort()
       : [...new Set(panelLinks.map((entry) => entry[key]))].sort();
-  return ['any', ...values].slice(0, 25);
+  const sanitizedValues = values.filter((value) => value !== 'any');
+  return ['any', ...sanitizedValues].slice(0, 25);
 }
 
 function getUsageCountForPeriod(userId, panelName, period, nowMs = Date.now()) {
@@ -951,6 +952,11 @@ async function handleChatCommand(interaction) {
         return;
       }
 
+      if (filters.includes('any') || type === 'any') {
+        await replyEphemeral(interaction, 'The value `any` is reserved by the panel selector. Use another filter/type name.');
+        return;
+      }
+
       try {
         new URL(url);
       } catch {
@@ -983,6 +989,11 @@ async function handleChatCommand(interaction) {
 
       if (filters.length === 0) {
         await replyEphemeral(interaction, 'Provide at least one filter. You can comma-separate multiple filters.');
+        return;
+      }
+
+      if (filters.includes('any') || type === 'any') {
+        await replyEphemeral(interaction, 'The value `any` is reserved by the panel selector. Use another filter/type name.');
         return;
       }
 
