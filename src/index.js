@@ -45,6 +45,7 @@ state.dispenserLinks ??= [];
 state.dispenserLimits ??= [];
 state.dispenserUsage ??= [];
 state.dispenserPanelMessages ??= {};
+state.dispenserPanelMetadata ??= {};
 state.moderationRules ??= {};
 
 state.dispenserLinks = state.dispenserLinks.map((entry) => ({
@@ -336,6 +337,50 @@ function buildDispenserPanelComponents(panelName) {
     new ActionRowBuilder().addComponents(typeMenu),
     new ActionRowBuilder().addComponents(dispenseButton),
   ];
+}
+
+async function refreshDispenserPanels(panelName) {
+  const panelEntries = Object.entries(state.dispenserPanelMessages).filter(([, storedPanelName]) => storedPanelName === panelName);
+  let refreshedCount = 0;
+
+  for (const [messageId] of panelEntries) {
+    const metadata = state.dispenserPanelMetadata[messageId];
+    const channelId = metadata?.channelId;
+
+    if (!channelId) {
+      continue;
+    }
+
+    const channel = await client.channels.fetch(channelId).catch(() => null);
+    if (!channel?.isTextBased?.()) {
+      continue;
+    }
+
+    const message = await channel.messages.fetch(messageId).catch(() => null);
+    if (!message) {
+      continue;
+    }
+
+    const sourceEmbed = message.embeds[0];
+    const title = sourceEmbed?.title ?? 'Link Dispenser';
+    const description = sourceEmbed?.description ?? 'Choose a filter and type, then click Dispense Link.';
+    const color = sourceEmbed?.color ?? 0x3498db;
+
+    const updatedEmbed = new EmbedBuilder()
+      .setColor(color)
+      .setTitle(title)
+      .setDescription(description)
+      .addFields(
+        { name: 'Available filters', value: String(getDispenserCategoryOptions(panelName, 'filter').filter((value) => value !== 'any').length), inline: true },
+        { name: 'Available types', value: String(getDispenserCategoryOptions(panelName, 'type').filter((value) => value !== 'any').length), inline: true },
+        { name: 'Panel', value: panelName, inline: false },
+      );
+
+    await message.edit({ embeds: [updatedEmbed], components: buildDispenserPanelComponents(panelName) });
+    refreshedCount += 1;
+  }
+
+  return refreshedCount;
 }
 
 function findRelaySessionByChannelId(channelId) {
@@ -1019,7 +1064,9 @@ async function handleChatCommand(interaction) {
       state.dispenserLinks.push(entry);
       await saveState(state);
 
-      await replyEphemeral(interaction, `Saved link \`${entry.id}\` in panel \`${panelName}\` for filters \`${filters.join(', ')}\` and type \`${type}\`.`);
+      const refreshedCount = await refreshDispenserPanels(panelName);
+
+      await replyEphemeral(interaction, `Saved link \`${entry.id}\` in panel \`${panelName}\` for filters \`${filters.join(', ')}\` and type \`${type}\`. Refreshed ${refreshedCount} panel${refreshedCount === 1 ? '' : 's'}.`);
       return;
     }
 
@@ -1114,6 +1161,9 @@ async function handleChatCommand(interaction) {
 
       if (added > 0) {
         await saveState(state);
+        const refreshedCount = await refreshDispenserPanels(panelName);
+        await replyEphemeral(interaction, `Bulk add complete for panel \`${panelName}\`. Added: ${added}, Skipped duplicates: ${skipped}, Invalid URLs: ${invalid}. Refreshed ${refreshedCount} panel${refreshedCount === 1 ? '' : 's'}.`);
+        return;
       }
 
       await replyEphemeral(interaction, `Bulk add complete for panel \`${panelName}\`. Added: ${added}, Skipped duplicates: ${skipped}, Invalid URLs: ${invalid}.`);
@@ -1218,6 +1268,10 @@ async function handleChatCommand(interaction) {
 
         const panelMessage = await interaction.channel.send({ embeds: [embed], components: buildDispenserPanelComponents(panelName) });
         state.dispenserPanelMessages[panelMessage.id] = panelName;
+        state.dispenserPanelMetadata[panelMessage.id] = {
+          panelName,
+          channelId: interaction.channel.id,
+        };
         await saveState(state);
         await replyEphemeral(interaction, 'Dispenser panel posted.');
       } catch (err) {

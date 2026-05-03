@@ -18,6 +18,7 @@ const defaultState = {
   dispenserLimits: [],
   dispenserUsage: [],
   dispenserPanelMessages: {},
+  dispenserPanelMetadata: {},
   moderationRules: {},
 };
 
@@ -51,6 +52,7 @@ export async function loadState() {
       dispenserLimits: parsedState.dispenserLimits ?? [],
       dispenserUsage: parsedState.dispenserUsage ?? [],
       dispenserPanelMessages: parsedState.dispenserPanelMessages ?? {},
+      dispenserPanelMetadata: parsedState.dispenserPanelMetadata ?? {},
       moderationRules: parsedState.moderationRules ?? {},
     };
 
