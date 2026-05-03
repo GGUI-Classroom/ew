@@ -20,6 +20,8 @@ const defaultState = {
   dispenserPanelMessages: {},
   dispenserPanelMetadata: {},
   moderationRules: {},
+  autobanList: [],
+  autobanGuilds: {},
 };
 
 export async function loadState() {
@@ -54,6 +56,8 @@ export async function loadState() {
       dispenserPanelMessages: parsedState.dispenserPanelMessages ?? {},
       dispenserPanelMetadata: parsedState.dispenserPanelMetadata ?? {},
       moderationRules: parsedState.moderationRules ?? {},
+      autobanList: parsedState.autobanList ?? [],
+      autobanGuilds: parsedState.autobanGuilds ?? {},
     };
 
     await saveState(normalizedState);

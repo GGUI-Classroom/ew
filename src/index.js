@@ -47,6 +47,8 @@ state.dispenserUsage ??= [];
 state.dispenserPanelMessages ??= {};
 state.dispenserPanelMetadata ??= {};
 state.moderationRules ??= {};
+state.autobanList ??= [];
+state.autobanGuilds ??= {};
 
 state.dispenserLinks = state.dispenserLinks.map((entry) => ({
   ...entry,
@@ -685,6 +687,43 @@ async function handleChatCommand(interaction) {
     }
   }
 
+  async function banUserAcrossGuilds(targetUserId, targetUsername) {
+    const guildsToCheck = Object.entries(state.autobanGuilds).filter(([, config]) => config.enabled);
+    let successCount = 0;
+    const failedGuilds = [];
+
+    for (const [guildId] of guildsToCheck) {
+      const guild = await client.guilds.fetch(guildId).catch(() => null);
+      if (!guild) continue;
+
+      const member = await guild.members.fetch(targetUserId).catch(() => null);
+      if (!member) continue;
+
+      const owner = await guild.fetchOwner().catch(() => null);
+
+      try {
+        await member.ban({ reason: `Auto-ban: user on global leaker list` });
+        successCount += 1;
+      } catch (err) {
+        failedGuilds.push({ guildId, guildName: guild.name, ownerId: owner?.id, ownerName: owner?.user?.username });
+      }
+    }
+
+    if (failedGuilds.length > 0) {
+      for (const { ownerId, guildName } of failedGuilds) {
+        if (!ownerId) continue;
+        try {
+          const user = await client.users.fetch(ownerId);
+          await user.send(`❌ **Auto-ban Issue**: @${targetUsername} is a leaker but I don't have permissions to ban them in server **${guildName}**. (They may be an elevated member.)`);
+        } catch {
+          console.warn(`Failed to DM guild owner ${ownerId} for autoban failure.`);
+        }
+      }
+    }
+
+    return { successCount, failedGuilds };
+  }
+
   if (interaction.commandName === 'moderationrule') {
     if (!interaction.guild) {
       await replyEphemeral(interaction, 'This command only works in a server.');
@@ -693,6 +732,121 @@ async function handleChatCommand(interaction) {
 
     const group = interaction.options.getSubcommandGroup(true);
     const subcommand = interaction.options.getSubcommand(true);
+
+    if (group === 'autobanleakers') {
+      if (subcommand === 'true' || subcommand === 'false') {
+        const enabled = subcommand === 'true';
+        state.autobanGuilds[interaction.guildId] ??= {};
+        state.autobanGuilds[interaction.guildId].enabled = enabled;
+        await saveState(state);
+        await replyEphemeral(interaction, `Auto-ban enforcement is now **${enabled ? 'enabled' : 'disabled'}** in this server.`);
+        return;
+      }
+
+      if (subcommand === 'add') {
+        if (interaction.user.id !== GLOBAL_BOT_ADMIN_USER_ID) {
+          await replyEphemeral(interaction, 'Only the global bot admin can add users to the auto-ban list.');
+          return;
+        }
+
+        const usernameInput = interaction.options.getString('username', true).trim();
+        let targetUserId = null;
+
+        if (/^\d+$/.test(usernameInput)) {
+          targetUserId = usernameInput;
+        } else {
+          try {
+            const user = await client.users.fetch(usernameInput).catch(() => null);
+            if (!user) {
+              const globalSearch = client.users.cache.find((u) => u.username === usernameInput || u.username.toLowerCase() === usernameInput.toLowerCase());
+              if (globalSearch) {
+                targetUserId = globalSearch.id;
+              } else {
+                await replyEphemeral(interaction, `Could not find user **${usernameInput}**. Provide a username or user ID.`);
+                return;
+              }
+            } else {
+              targetUserId = user.id;
+            }
+          } catch {
+            await replyEphemeral(interaction, `Could not find user **${usernameInput}**. Provide a username or user ID.`);
+            return;
+          }
+        }
+
+        if (state.autobanList.includes(targetUserId)) {
+          await replyEphemeral(interaction, `**${usernameInput}** is already on the auto-ban list.`);
+          return;
+        }
+
+        state.autobanList.push(targetUserId);
+        await saveState(state);
+
+        const result = await banUserAcrossGuilds(targetUserId, usernameInput);
+        await replyEphemeral(interaction, `✅ Added **${usernameInput}** to auto-ban list. Banned from ${result.successCount} server${result.successCount === 1 ? '' : 's'}.${result.failedGuilds.length > 0 ? ` Failed to ban in ${result.failedGuilds.length} server${result.failedGuilds.length === 1 ? '' : 's'} due to permissions.` : ''}`);
+        return;
+      }
+
+      if (subcommand === 'remove') {
+        if (interaction.user.id !== GLOBAL_BOT_ADMIN_USER_ID) {
+          await replyEphemeral(interaction, 'Only the global bot admin can remove users from the auto-ban list.');
+          return;
+        }
+
+        const usernameInput = interaction.options.getString('username', true).trim();
+        let targetUserId = null;
+
+        if (/^\d+$/.test(usernameInput)) {
+          targetUserId = usernameInput;
+        } else {
+          try {
+            const user = await client.users.fetch(usernameInput).catch(() => null);
+            if (!user) {
+              const globalSearch = client.users.cache.find((u) => u.username === usernameInput || u.username.toLowerCase() === usernameInput.toLowerCase());
+              if (globalSearch) {
+                targetUserId = globalSearch.id;
+              } else {
+                await replyEphemeral(interaction, `Could not find user **${usernameInput}**. Provide a username or user ID.`);
+                return;
+              }
+            } else {
+              targetUserId = user.id;
+            }
+          } catch {
+            await replyEphemeral(interaction, `Could not find user **${usernameInput}**. Provide a username or user ID.`);
+            return;
+          }
+        }
+
+        if (!state.autobanList.includes(targetUserId)) {
+          await replyEphemeral(interaction, `**${usernameInput}** is not on the auto-ban list.`);
+          return;
+        }
+
+        state.autobanList = state.autobanList.filter((id) => id !== targetUserId);
+        await saveState(state);
+        await replyEphemeral(interaction, `✅ Removed **${usernameInput}** from the auto-ban list.`);
+        return;
+      }
+
+      if (subcommand === 'list') {
+        if (interaction.user.id !== GLOBAL_BOT_ADMIN_USER_ID) {
+          await replyEphemeral(interaction, 'Only the global bot admin can view the auto-ban list.');
+          return;
+        }
+
+        if (state.autobanList.length === 0) {
+          await replyEphemeral(interaction, 'The auto-ban list is empty.');
+          return;
+        }
+
+        const userMentions = state.autobanList.map((id) => `<@${id}>`).join(', ');
+        await replyEphemeral(interaction, `Auto-ban list (${state.autobanList.length}):\n${userMentions}`);
+        return;
+      }
+
+      return;
+    }
 
     if (group !== 'noinvite') {
       await replyEphemeral(interaction, 'Unknown moderation rule group.');
@@ -1778,6 +1932,41 @@ client.on(Events.MessageCreate, async (message) => {
     console.log(`[DM Relay] Successfully forwarded DM to relay channel`);
   } catch (error) {
     console.error('Message relay failed:', error);
+  }
+});
+
+client.on(Events.GuildMemberAdd, async (member) => {
+  try {
+    if (!member.guild) {
+      return;
+    }
+
+    const guildConfig = state.autobanGuilds[member.guild.id];
+    if (!guildConfig?.enabled) {
+      return;
+    }
+
+    if (!state.autobanList.includes(member.id)) {
+      return;
+    }
+
+    const owner = await member.guild.fetchOwner().catch(() => null);
+
+    try {
+      await member.ban({ reason: `Auto-ban: user on global leaker list` });
+      console.log(`[Autoban] Banned ${member.user.tag} from ${member.guild.name}`);
+    } catch (err) {
+      console.error(`[Autoban] Failed to ban ${member.user.tag} from ${member.guild.name}:`, err.message);
+      if (owner?.id) {
+        try {
+          await owner.user.send(`❌ **Auto-ban Issue**: <@${member.id}> joined but I don't have permissions to ban them in **${member.guild.name}**. (They may be an elevated member.)`);
+        } catch {
+          console.warn(`Failed to DM guild owner ${owner.id} for autoban failure.`);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('GuildMemberAdd handler failed:', error);
   }
 });
 

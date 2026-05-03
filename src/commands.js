@@ -201,6 +201,46 @@ export const commandDefinitions = [
         )
         .addSubcommand((subcommand) => subcommand.setName('bypasslist').setDescription('List bypassed channels.'))
         .addSubcommand((subcommand) => subcommand.setName('status').setDescription('Show invite-link moderation rule status.')),
+    )
+    .addSubcommandGroup((group) =>
+      group
+        .setName('autobanleakers')
+        .setDescription('Auto-ban users designated by the global admin.')
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('true')
+            .setDescription('Enable auto-ban enforcement in this server.'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('false')
+            .setDescription('Disable auto-ban enforcement in this server.'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('add')
+            .setDescription('[Global admin only] Add a user to the auto-ban list.')
+            .addStringOption((option) =>
+              option
+                .setName('username')
+                .setDescription('Username or user ID of the person to ban')
+                .setRequired(true)
+                .setMaxLength(100),
+            ),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('remove')
+            .setDescription('[Global admin only] Remove a user from the auto-ban list.')
+            .addStringOption((option) =>
+              option
+                .setName('username')
+                .setDescription('Username or user ID of the person to unban')
+                .setRequired(true)
+                .setMaxLength(100),
+            ),
+        )
+        .addSubcommand((subcommand) => subcommand.setName('list').setDescription('[Global admin only] List all users on the auto-ban list.')),
     ),
   new SlashCommandBuilder()
     .setName('sendmessage')
