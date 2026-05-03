@@ -1204,10 +1204,27 @@ async function handleChatCommand(interaction) {
 
       embed.addFields({ name: 'Panel', value: panelName, inline: false });
 
-      const panelMessage = await interaction.channel.send({ embeds: [embed], components: buildDispenserPanelComponents(panelName) });
-      state.dispenserPanelMessages[panelMessage.id] = panelName;
-      await saveState(state);
-      await replyEphemeral(interaction, 'Dispenser panel posted.');
+      try {
+        if (!interaction.channel || !interaction.channel.isTextBased()) {
+          await replyEphemeral(interaction, 'This command must be used in a server text channel.');
+          return;
+        }
+
+        const botPerms = interaction.channel.permissionsFor?.(client.user);
+        if (botPerms && !botPerms.has?.(PermissionsBitField.Flags.SendMessages)) {
+          await replyEphemeral(interaction, 'I do not have permission to post in this channel.');
+          return;
+        }
+
+        const panelMessage = await interaction.channel.send({ embeds: [embed], components: buildDispenserPanelComponents(panelName) });
+        state.dispenserPanelMessages[panelMessage.id] = panelName;
+        await saveState(state);
+        await replyEphemeral(interaction, 'Dispenser panel posted.');
+      } catch (err) {
+        console.error('Dispenser panel creation failed:', err);
+        const details = err?.message ?? String(err);
+        await replyEphemeral(interaction, `Failed to post dispenser panel: ${details}`);
+      }
       return;
     }
 
