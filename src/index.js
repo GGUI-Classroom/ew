@@ -21,6 +21,7 @@ import { loadState, saveState } from './storage.js';
 const token = process.env.DISCORD_TOKEN;
 const port = Number(process.env.PORT || 0);
 const RELAY_ROLE_ID = '1492370989399543808';
+const GLOBAL_BOT_ADMIN_USER_ID = '1482047407423230064';
 const PRESENCE_ROTATION_MS = 10000;
 const MAX_TIMEOUT_MS = 28 * 24 * 60 * 60 * 1000;
 const NOINVITE_TIMEOUT_DEFAULT_MS = 60_000;
@@ -37,8 +38,9 @@ const presenceStates = [
 
 const state = await loadState();
 state.warnings ??= {};
-state.adminRoleIds ??= [RELAY_ROLE_ID];
+state.adminRoleIds ??= [];
 state.adminUserIds ??= [];
+state.guildAdmins ??= {};
 state.dispenserLinks ??= [];
 state.dispenserLimits ??= [];
 state.dispenserUsage ??= [];
@@ -234,10 +236,27 @@ function isServerAdministrator(interaction) {
   return interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator) ?? false;
 }
 
+function getGuildAdminConfig(guildId) {
+  state.guildAdmins ??= {};
+  state.guildAdmins[guildId] ??= {
+    roleIds: [],
+    userIds: [],
+  };
+
+  state.guildAdmins[guildId].roleIds ??= [];
+  state.guildAdmins[guildId].userIds ??= [];
+  state.guildAdmins[guildId].roleIds = [...new Set(state.guildAdmins[guildId].roleIds)];
+  state.guildAdmins[guildId].userIds = [...new Set(state.guildAdmins[guildId].userIds)];
+
+  return state.guildAdmins[guildId];
+}
+
 function hasConfiguredAdminRole(interaction) {
   if (!interaction.inGuild()) {
     return false;
   }
+
+  const guildConfig = getGuildAdminConfig(interaction.guildId);
 
   const roleIds = interaction.member?.roles?.cache?.keys?.();
   if (!roleIds) {
@@ -245,7 +264,7 @@ function hasConfiguredAdminRole(interaction) {
   }
 
   for (const roleId of roleIds) {
-    if (state.adminRoleIds.includes(roleId)) {
+    if (guildConfig.roleIds.includes(roleId)) {
       return true;
     }
   }
@@ -254,7 +273,16 @@ function hasConfiguredAdminRole(interaction) {
 }
 
 function isBotAdmin(interaction) {
-  return isServerAdministrator(interaction) || state.adminUserIds.includes(interaction.user.id) || hasConfiguredAdminRole(interaction);
+  if (interaction.user.id === GLOBAL_BOT_ADMIN_USER_ID) {
+    return true;
+  }
+
+  if (!interaction.inGuild()) {
+    return false;
+  }
+
+  const guildConfig = getGuildAdminConfig(interaction.guildId);
+  return isServerAdministrator(interaction) || guildConfig.userIds.includes(interaction.user.id) || hasConfiguredAdminRole(interaction);
 }
 
 function getDispenserCategoryOptions(panelName, key) {
@@ -535,65 +563,79 @@ async function handleChatCommand(interaction) {
   }
 
   if (interaction.commandName === 'admin') {
+    if (!interaction.guildId) {
+      await replyEphemeral(interaction, 'This command only works in a server.');
+      return;
+    }
+
     const subcommand = interaction.options.getSubcommand(true);
+    const guildConfig = getGuildAdminConfig(interaction.guildId);
 
     if (subcommand === 'addrole') {
       const role = interaction.options.getRole('role', true);
 
-      if (!state.adminRoleIds.includes(role.id)) {
-        state.adminRoleIds.push(role.id);
+      if (!guildConfig.roleIds.includes(role.id)) {
+        guildConfig.roleIds.push(role.id);
         await saveState(state);
       }
 
-      await replyEphemeral(interaction, `Added ${role} to bot admin roles.`);
+      await replyEphemeral(interaction, `Added ${role} to bot admin roles for this server.`);
       return;
     }
 
     if (subcommand === 'removerole') {
       const role = interaction.options.getRole('role', true);
-      state.adminRoleIds = state.adminRoleIds.filter((id) => id !== role.id);
+      guildConfig.roleIds = guildConfig.roleIds.filter((id) => id !== role.id);
       await saveState(state);
-      await replyEphemeral(interaction, `Removed ${role} from bot admin roles.`);
+      await replyEphemeral(interaction, `Removed ${role} from bot admin roles for this server.`);
       return;
     }
 
     if (subcommand === 'listroles') {
-      if (state.adminRoleIds.length === 0) {
+      if (guildConfig.roleIds.length === 0) {
         await replyEphemeral(interaction, 'No bot admin roles configured.');
         return;
       }
 
-      await replyEphemeral(interaction, `Bot admin roles:\n${state.adminRoleIds.map((id) => `- <@&${id}>`).join('\n')}`);
+      await replyEphemeral(interaction, `Bot admin roles for this server:\n${guildConfig.roleIds.map((id) => `- <@&${id}>`).join('\n')}`);
       return;
     }
 
     if (subcommand === 'adduser') {
       const user = interaction.options.getUser('user', true);
 
-      if (!state.adminUserIds.includes(user.id)) {
-        state.adminUserIds.push(user.id);
+      if (user.id === GLOBAL_BOT_ADMIN_USER_ID) {
+        await replyEphemeral(interaction, `${user.tag} is already a global bot admin.`);
+        return;
+      }
+
+      if (!guildConfig.userIds.includes(user.id)) {
+        guildConfig.userIds.push(user.id);
         await saveState(state);
       }
 
-      await replyEphemeral(interaction, `Added ${user.tag} to bot admin users.`);
+      await replyEphemeral(interaction, `Added ${user.tag} to bot admin users for this server.`);
       return;
     }
 
     if (subcommand === 'removeuser') {
       const user = interaction.options.getUser('user', true);
-      state.adminUserIds = state.adminUserIds.filter((id) => id !== user.id);
+
+      if (user.id === GLOBAL_BOT_ADMIN_USER_ID) {
+        await replyEphemeral(interaction, 'That user is the global bot admin and cannot be removed.');
+        return;
+      }
+
+      guildConfig.userIds = guildConfig.userIds.filter((id) => id !== user.id);
       await saveState(state);
-      await replyEphemeral(interaction, `Removed ${user.tag} from bot admin users.`);
+      await replyEphemeral(interaction, `Removed ${user.tag} from bot admin users for this server.`);
       return;
     }
 
     if (subcommand === 'listusers') {
-      if (state.adminUserIds.length === 0) {
-        await replyEphemeral(interaction, 'No bot admin users configured.');
-        return;
-      }
-
-      await replyEphemeral(interaction, `Bot admin users:\n${state.adminUserIds.map((id) => `- <@${id}>`).join('\n')}`);
+      const userLines = [`- <@${GLOBAL_BOT_ADMIN_USER_ID}> (global)`];
+      userLines.push(...guildConfig.userIds.map((id) => `- <@${id}> (this server)`));
+      await replyEphemeral(interaction, `Bot admin users:\n${userLines.join('\n')}`);
       return;
     }
   }
