@@ -341,6 +341,34 @@ function buildDispenserPanelComponents(panelName) {
   ];
 }
 
+function recoverDispenserPanelNameFromMessage(message) {
+  const mappedPanelName = state.dispenserPanelMessages[message.id];
+  if (mappedPanelName) {
+    return mappedPanelName;
+  }
+
+  const panelField = message.embeds?.[0]?.fields?.find((field) => normalizeCategory(field.name) === 'panel');
+  const recoveredPanelName = panelField?.value ? normalizePanelName(panelField.value) : '';
+
+  if (!recoveredPanelName) {
+    return null;
+  }
+
+  state.dispenserPanelMessages[message.id] = recoveredPanelName;
+  if (message.channelId) {
+    state.dispenserPanelMetadata[message.id] ??= {
+      panelName: recoveredPanelName,
+      channelId: message.channelId,
+    };
+  }
+
+  void saveState(state).catch((error) => {
+    console.error(`Failed to persist recovered dispenser panel ${message.id}:`, error);
+  });
+
+  return recoveredPanelName;
+}
+
 async function refreshDispenserPanels(panelName) {
   const panelEntries = Object.entries(state.dispenserPanelMessages).filter(([, storedPanelName]) => storedPanelName === panelName);
   let refreshedCount = 0;
@@ -1666,7 +1694,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return;
       }
 
-      const panelName = state.dispenserPanelMessages[interaction.message.id];
+      const panelName = recoverDispenserPanelNameFromMessage(interaction.message);
       if (!panelName) {
         await interaction.reply({ content: 'This dispenser panel is no longer configured.', flags: MessageFlags.Ephemeral });
         return;
@@ -1701,7 +1729,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           return;
         }
 
-        const panelName = state.dispenserPanelMessages[interaction.message.id];
+        const panelName = recoverDispenserPanelNameFromMessage(interaction.message);
         if (!panelName) {
           await interaction.reply({ content: 'This dispenser panel is no longer configured.', flags: MessageFlags.Ephemeral });
           return;
