@@ -53,6 +53,7 @@ state.moderationRules ??= {};
 state.autobanList ??= [];
 state.autobanGuilds ??= {};
 state.alertReports ??= [];
+state.alertPosts ??= [];
 
 state.dispenserLinks = state.dispenserLinks.map((entry) => ({
   ...entry,
@@ -162,6 +163,21 @@ function buildAlertEmbed(title, severity, description, reporterTag = null) {
 }
 
 async function broadcastAlert(title, severity, description) {
+  const alertId = `alert-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const alertRecord = {
+    id: alertId,
+    title,
+    severity,
+    description,
+    sentAt: new Date().toISOString(),
+    sentByUserId: GLOBAL_BOT_ADMIN_USER_ID,
+    sentByUserTag: client.user?.tag ?? 'Global Admin',
+    deliveries: [],
+  };
+
+  state.alertPosts.push(alertRecord);
+  await saveState(state);
+
   let guildCount = 0;
   let channelCount = 0;
   const embed = buildAlertEmbed(title, severity, description, client.user?.tag ?? 'Global Admin');
@@ -184,11 +200,22 @@ async function broadcastAlert(title, severity, description) {
         continue;
       }
 
-      await channel.send({ embeds: [embed] }).catch((error) => {
+      const sentMessage = await channel.send({ embeds: [embed] }).catch((error) => {
         console.warn(`[Alert] Failed to send in ${guild.name} #${channel.name}: ${error.message}`);
+        return null;
       });
-      channelCount += 1;
-      postedToGuild = true;
+
+      if (sentMessage) {
+        alertRecord.deliveries.push({
+          guildId: guild.id,
+          guildName: guild.name,
+          channelId: channel.id,
+          channelName: channel.name,
+          messageId: sentMessage.id,
+        });
+        channelCount += 1;
+        postedToGuild = true;
+      }
     }
 
     if (postedToGuild) {
@@ -196,7 +223,36 @@ async function broadcastAlert(title, severity, description) {
     }
   }
 
-  return { guildCount, channelCount };
+  await saveState(state);
+
+  return { guildCount, channelCount, alertId };
+}
+
+async function deleteAlertById(alertId) {
+  const index = state.alertPosts.findIndex((entry) => entry.id === alertId);
+  if (index === -1) {
+    return { deleted: false, reason: 'not_found', alert: null };
+  }
+
+  const [alert] = state.alertPosts.splice(index, 1);
+
+  for (const delivery of alert.deliveries ?? []) {
+    const guild = await client.guilds.fetch(delivery.guildId).catch(() => null);
+    const channel = guild ? await guild.channels.fetch(delivery.channelId).catch(() => null) : null;
+    if (!channel?.isTextBased?.()) {
+      continue;
+    }
+
+    const message = await channel.messages.fetch(delivery.messageId).catch(() => null);
+    if (!message) {
+      continue;
+    }
+
+    await message.delete().catch(() => null);
+  }
+
+  await saveState(state);
+  return { deleted: true, reason: 'deleted', alert };
 }
 
 function formatDurationMinutes(ms) {
@@ -701,7 +757,7 @@ async function handleChatCommand(interaction) {
         { name: 'General', value: '`/ping` `/about` `/help` `/serverinfo` `/userinfo` `/avatar`' },
         { name: 'Utility', value: '`/say` `/poll`' },
         { name: 'Moderation', value: '`/ban` `/kick` `/timeout` `/untimeout` `/purge` `/warn` `/warnings` `/moderationrule`' },
-        { name: 'Alerts', value: '`/alert send` `/alert report` `/alert report show`' },
+        { name: 'Alerts', value: '`/alert send` `/alert delete` `/alert report` `/alert report show`' },
         { name: 'DM Link', value: '`/dmconnect` `/dmend` `/dmstatus`' },
         { name: 'Reaction Roles', value: '`/reactionrole`' },
         { name: 'Global Admin', value: '`/admin addrole|removerole|listroles|adduser|removeuser|listusers`' },
@@ -1203,7 +1259,7 @@ async function handleChatCommand(interaction) {
       }
 
       const result = await broadcastAlert(title, severity, description);
-      await replyEphemeral(interaction, `Alert sent to ${result.channelCount} channel${result.channelCount === 1 ? '' : 's'} across ${result.guildCount} server${result.guildCount === 1 ? '' : 's'}.`);
+      await replyEphemeral(interaction, `Alert sent to ${result.channelCount} channel${result.channelCount === 1 ? '' : 's'} across ${result.guildCount} server${result.guildCount === 1 ? '' : 's'}. Alert ID: ${result.alertId}`);
       return;
     }
 
@@ -1228,6 +1284,32 @@ async function handleChatCommand(interaction) {
       });
       await saveState(state);
       await replyEphemeral(interaction, 'Your alert report was submitted.');
+      return;
+    }
+
+    if (subcommand === 'delete') {
+      if (interaction.user.id !== GLOBAL_BOT_ADMIN_USER_ID) {
+        await replyEphemeral(interaction, 'Only the global bot admin can delete alerts.');
+        return;
+      }
+
+      const alertIdInput = interaction.options.getString('id')?.trim();
+      const targetAlert = alertIdInput
+        ? state.alertPosts.find((entry) => entry.id === alertIdInput)
+        : state.alertPosts[state.alertPosts.length - 1];
+
+      if (!targetAlert) {
+        await replyEphemeral(interaction, alertIdInput ? 'No alert found with that ID.' : 'There are no sent alerts to delete.');
+        return;
+      }
+
+      const result = await deleteAlertById(targetAlert.id);
+      if (!result.deleted) {
+        await replyEphemeral(interaction, 'That alert could not be deleted.');
+        return;
+      }
+
+      await replyEphemeral(interaction, `Deleted alert ${targetAlert.id} from all channels it was posted in.`);
       return;
     }
 

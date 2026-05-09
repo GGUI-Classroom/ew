@@ -23,6 +23,7 @@ const defaultState = {
   autobanList: [],
   autobanGuilds: {},
   alertReports: [],
+  alertPosts: [],
 };
 
 export async function loadState() {
@@ -60,6 +61,7 @@ export async function loadState() {
       autobanList: parsedState.autobanList ?? [],
       autobanGuilds: parsedState.autobanGuilds ?? {},
       alertReports: parsedState.alertReports ?? [],
+      alertPosts: parsedState.alertPosts ?? [],
     };
 
     await saveState(normalizedState);

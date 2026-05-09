@@ -87,6 +87,12 @@ export const commandDefinitions = [
           .setDescription('Report an alert or view reports.')
           .addStringOption((option) => option.setName('report').setDescription('Report details').setRequired(false).setMaxLength(2000)),
       )
+      .addSubcommand((subcommand) =>
+        subcommand
+          .setName('delete')
+          .setDescription('[Global admin only] Delete a previously sent alert from all channels.')
+          .addStringOption((option) => option.setName('id').setDescription('Alert ID from the send response').setRequired(false).setMaxLength(80)),
+      )
       .addSubcommand((subcommand) => subcommand.setName('show').setDescription('[Global admin only] Show submitted alert reports.')),
   new SlashCommandBuilder()
     .setName('purge')
