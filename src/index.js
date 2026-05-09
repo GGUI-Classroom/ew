@@ -23,6 +23,7 @@ const port = Number(process.env.PORT || 0);
 const RELAY_ROLE_ID = '1492370989399543808';
 const GLOBAL_BOT_ADMIN_USER_ID = '1482047407423230064';
 const ALERT_EMOJI = '<:alert:1502480536231477248>';
+const ALERT_EMOJI_URL = 'https://cdn.discordapp.com/emojis/1502480536231477248.png?quality=lossless';
 const ALERT_SEPARATOR = '_________________________';
 const PRESENCE_ROTATION_MS = 10000;
 const MAX_TIMEOUT_MS = 28 * 24 * 60 * 60 * 1000;
@@ -140,10 +141,30 @@ function buildAlertContent(title, severity, description) {
   ].join('\n');
 }
 
+function buildAlertEmbed(title, severity, description, reporterTag = null) {
+  const embed = new EmbedBuilder()
+    .setColor(0xe67e22)
+    .setTitle(`${ALERT_EMOJI} ${title} ${ALERT_EMOJI}`)
+    .setDescription([
+      `**Severity:** ${severity}`,
+      '',
+      description,
+      '',
+      ALERT_SEPARATOR,
+    ].join('\n'))
+    .setThumbnail(ALERT_EMOJI_URL);
+
+  if (reporterTag) {
+    embed.setFooter({ text: `Alert issued by ${reporterTag}` });
+  }
+
+  return embed;
+}
+
 async function broadcastAlert(title, severity, description) {
-  const content = buildAlertContent(title, severity, description);
   let guildCount = 0;
   let channelCount = 0;
+  const embed = buildAlertEmbed(title, severity, description, client.user?.tag ?? 'Global Admin');
 
   for (const guild of client.guilds.cache.values()) {
     const me = guild.members.me ?? (await guild.members.fetchMe().catch(() => null));
@@ -163,7 +184,7 @@ async function broadcastAlert(title, severity, description) {
         continue;
       }
 
-      await channel.send({ content }).catch((error) => {
+      await channel.send({ embeds: [embed] }).catch((error) => {
         console.warn(`[Alert] Failed to send in ${guild.name} #${channel.name}: ${error.message}`);
       });
       channelCount += 1;
