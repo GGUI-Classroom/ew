@@ -145,7 +145,7 @@ function buildAlertContent(title, severity, description) {
 function buildAlertEmbed(title, severity, description, reporterTag = null) {
   const embed = new EmbedBuilder()
     .setColor(0xe67e22)
-    .setTitle(`${ALERT_EMOJI} ${title} ${ALERT_EMOJI}`)
+    .setAuthor({ name: title, iconURL: ALERT_EMOJI_URL })
     .setDescription([
       `**Severity:** ${severity}`,
       '',
@@ -160,6 +160,15 @@ function buildAlertEmbed(title, severity, description, reporterTag = null) {
   }
 
   return embed;
+}
+
+function isAnnouncementTargetChannel(channel) {
+  if (channel.type === ChannelType.GuildAnnouncement) {
+    return true;
+  }
+
+  const channelName = channel.name?.toLowerCase() ?? '';
+  return /announce|announcement|announcements/.test(channelName);
 }
 
 async function broadcastAlert(title, severity, description, mode, alertId = null) {
@@ -197,7 +206,7 @@ async function broadcastAlert(title, severity, description, mode, alertId = null
         continue;
       }
 
-      if (announcementOnly && channel.type !== ChannelType.GuildAnnouncement) {
+      if (announcementOnly && !isAnnouncementTargetChannel(channel)) {
         continue;
       }
 
@@ -259,15 +268,6 @@ async function broadcastAlert(title, severity, description, mode, alertId = null
 
     if (postedToGuild) {
       guildCount += 1;
-    }
-
-    if (announcementOnly) {
-      const owner = await guild.fetchOwner().catch(() => null);
-      if (owner?.user) {
-        await owner.user.send({ embeds: [embed] }).catch((error) => {
-          console.warn(`[Alert] Failed to DM owner for ${guild.name}: ${error.message}`);
-        });
-      }
     }
   }
 
