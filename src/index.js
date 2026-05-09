@@ -162,10 +162,10 @@ function buildAlertEmbed(title, severity, description, reporterTag = null) {
   return embed;
 }
 
-async function broadcastAlert(title, severity, description) {
-  const alertId = `alert-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+async function broadcastAlert(title, severity, description, mode, alertId = null) {
+  const finalAlertId = alertId ?? `alert-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const alertRecord = {
-    id: alertId,
+    id: finalAlertId,
     title,
     severity,
     description,
@@ -181,6 +181,7 @@ async function broadcastAlert(title, severity, description) {
   let guildCount = 0;
   let channelCount = 0;
   const embed = buildAlertEmbed(title, severity, description, client.user?.tag ?? 'Global Admin');
+  const announcementOnly = mode === 'announcements_owner_dm';
 
   for (const guild of client.guilds.cache.values()) {
     const me = guild.members.me ?? (await guild.members.fetchMe().catch(() => null));
@@ -189,14 +190,24 @@ async function broadcastAlert(title, severity, description) {
     }
 
     let postedToGuild = false;
+    const announcementChannels = [];
 
     for (const channel of guild.channels.cache.values()) {
       if (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement) {
         continue;
       }
 
+      if (announcementOnly && channel.type !== ChannelType.GuildAnnouncement) {
+        continue;
+      }
+
       const permissions = channel.permissionsFor(me);
       if (!permissions?.has(PermissionsBitField.Flags.ViewChannel) || !permissions.has(PermissionsBitField.Flags.SendMessages)) {
+        continue;
+      }
+
+      if (announcementOnly) {
+        announcementChannels.push(channel);
         continue;
       }
 
@@ -218,14 +229,51 @@ async function broadcastAlert(title, severity, description) {
       }
     }
 
+    if (announcementOnly && announcementChannels.length > 0) {
+      for (const channel of announcementChannels) {
+        const sentMessage = await channel.send({ embeds: [embed] }).catch((error) => {
+          console.warn(`[Alert] Failed to send announcement in ${guild.name} #${channel.name}: ${error.message}`);
+          return null;
+        });
+
+        if (sentMessage) {
+          alertRecord.deliveries.push({
+            guildId: guild.id,
+            guildName: guild.name,
+            channelId: channel.id,
+            channelName: channel.name,
+            messageId: sentMessage.id,
+          });
+          channelCount += 1;
+          postedToGuild = true;
+        }
+      }
+
+      const owner = await guild.fetchOwner().catch(() => null);
+      if (owner?.user) {
+        await owner.user.send({ embeds: [embed] }).catch((error) => {
+          console.warn(`[Alert] Failed to DM owner for ${guild.name}: ${error.message}`);
+        });
+      }
+    }
+
     if (postedToGuild) {
       guildCount += 1;
+    }
+
+    if (announcementOnly) {
+      const owner = await guild.fetchOwner().catch(() => null);
+      if (owner?.user) {
+        await owner.user.send({ embeds: [embed] }).catch((error) => {
+          console.warn(`[Alert] Failed to DM owner for ${guild.name}: ${error.message}`);
+        });
+      }
     }
   }
 
   await saveState(state);
 
-  return { guildCount, channelCount, alertId };
+  return { guildCount, channelCount, alertId: finalAlertId };
 }
 
 async function deleteAlertById(alertId) {
@@ -1252,14 +1300,21 @@ async function handleChatCommand(interaction) {
       const title = interaction.options.getString('title', true).trim();
       const severity = interaction.options.getString('severity', true).trim();
       const description = interaction.options.getString('description', true).trim();
+      const mode = interaction.options.getString('mode', true);
 
       if (!title || !severity || !description) {
         await replyEphemeral(interaction, 'Title, severity, and description are required.');
         return;
       }
 
-      const result = await broadcastAlert(title, severity, description);
-      await replyEphemeral(interaction, `Alert sent to ${result.channelCount} channel${result.channelCount === 1 ? '' : 's'} across ${result.guildCount} server${result.guildCount === 1 ? '' : 's'}. Alert ID: ${result.alertId}`);
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => null);
+
+      const alertId = `alert-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const initialMessage = `Alert queued. Alert ID: ${alertId}. Delivery mode: ${mode === 'announcements_owner_dm' ? 'announcements only + owner DM' : 'all channels'}. Broadcasting now...`;
+      await interaction.editReply(initialMessage).catch(() => null);
+
+      const result = await broadcastAlert(title, severity, description, mode, alertId);
+      await interaction.editReply(`Alert sent. Alert ID: ${result.alertId}. Sent to ${result.channelCount} channel${result.channelCount === 1 ? '' : 's'} across ${result.guildCount} server${result.guildCount === 1 ? '' : 's'}.`).catch(() => null);
       return;
     }
 
