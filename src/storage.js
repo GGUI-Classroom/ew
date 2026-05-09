@@ -22,6 +22,7 @@ const defaultState = {
   moderationRules: {},
   autobanList: [],
   autobanGuilds: {},
+  alertReports: [],
 };
 
 export async function loadState() {
@@ -58,6 +59,7 @@ export async function loadState() {
       moderationRules: parsedState.moderationRules ?? {},
       autobanList: parsedState.autobanList ?? [],
       autobanGuilds: parsedState.autobanGuilds ?? {},
+      alertReports: parsedState.alertReports ?? [],
     };
 
     await saveState(normalizedState);

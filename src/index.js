@@ -22,6 +22,8 @@ const token = process.env.DISCORD_TOKEN;
 const port = Number(process.env.PORT || 0);
 const RELAY_ROLE_ID = '1492370989399543808';
 const GLOBAL_BOT_ADMIN_USER_ID = '1482047407423230064';
+const ALERT_EMOJI = '<:alert:1502480536231477248>';
+const ALERT_SEPARATOR = '_________________________';
 const PRESENCE_ROTATION_MS = 10000;
 const MAX_TIMEOUT_MS = 28 * 24 * 60 * 60 * 1000;
 const NOINVITE_TIMEOUT_DEFAULT_MS = 60_000;
@@ -49,6 +51,7 @@ state.dispenserPanelMetadata ??= {};
 state.moderationRules ??= {};
 state.autobanList ??= [];
 state.autobanGuilds ??= {};
+state.alertReports ??= [];
 
 state.dispenserLinks = state.dispenserLinks.map((entry) => ({
   ...entry,
@@ -123,6 +126,56 @@ function parseFilterList(raw) {
 
 function normalizePanelName(raw) {
   return normalizeCategory(raw).slice(0, 50);
+}
+
+function buildAlertContent(title, severity, description) {
+  return [
+    `${ALERT_EMOJI} ${title} ${ALERT_EMOJI}`,
+    '',
+    severity,
+    '',
+    description,
+    '',
+    ALERT_SEPARATOR,
+  ].join('\n');
+}
+
+async function broadcastAlert(title, severity, description) {
+  const content = buildAlertContent(title, severity, description);
+  let guildCount = 0;
+  let channelCount = 0;
+
+  for (const guild of client.guilds.cache.values()) {
+    const me = guild.members.me ?? (await guild.members.fetchMe().catch(() => null));
+    if (!me) {
+      continue;
+    }
+
+    let postedToGuild = false;
+
+    for (const channel of guild.channels.cache.values()) {
+      if (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement) {
+        continue;
+      }
+
+      const permissions = channel.permissionsFor(me);
+      if (!permissions?.has(PermissionsBitField.Flags.ViewChannel) || !permissions.has(PermissionsBitField.Flags.SendMessages)) {
+        continue;
+      }
+
+      await channel.send({ content }).catch((error) => {
+        console.warn(`[Alert] Failed to send in ${guild.name} #${channel.name}: ${error.message}`);
+      });
+      channelCount += 1;
+      postedToGuild = true;
+    }
+
+    if (postedToGuild) {
+      guildCount += 1;
+    }
+  }
+
+  return { guildCount, channelCount };
 }
 
 function formatDurationMinutes(ms) {
@@ -627,6 +680,7 @@ async function handleChatCommand(interaction) {
         { name: 'General', value: '`/ping` `/about` `/help` `/serverinfo` `/userinfo` `/avatar`' },
         { name: 'Utility', value: '`/say` `/poll`' },
         { name: 'Moderation', value: '`/ban` `/kick` `/timeout` `/untimeout` `/purge` `/warn` `/warnings` `/moderationrule`' },
+        { name: 'Alerts', value: '`/alert send` `/alert report` `/alert report show`' },
         { name: 'DM Link', value: '`/dmconnect` `/dmend` `/dmstatus`' },
         { name: 'Reaction Roles', value: '`/reactionrole`' },
         { name: 'Global Admin', value: '`/admin addrole|removerole|listroles|adduser|removeuser|listusers`' },
@@ -1106,6 +1160,89 @@ async function handleChatCommand(interaction) {
 
     await targetUser.send({ content: message }).catch((err) => null);
     await replyEphemeral(interaction, `Message sent to ${targetUser.tag}.`);
+    return;
+  }
+
+  if (interaction.commandName === 'alert') {
+    const subcommand = interaction.options.getSubcommand(true);
+
+    if (subcommand === 'send') {
+      if (interaction.user.id !== GLOBAL_BOT_ADMIN_USER_ID) {
+        await replyEphemeral(interaction, 'Only the global bot admin can send alerts.');
+        return;
+      }
+
+      const title = interaction.options.getString('title', true).trim();
+      const severity = interaction.options.getString('severity', true).trim();
+      const description = interaction.options.getString('description', true).trim();
+
+      if (!title || !severity || !description) {
+        await replyEphemeral(interaction, 'Title, severity, and description are required.');
+        return;
+      }
+
+      const result = await broadcastAlert(title, severity, description);
+      await replyEphemeral(interaction, `Alert sent to ${result.channelCount} channel${result.channelCount === 1 ? '' : 's'} across ${result.guildCount} server${result.guildCount === 1 ? '' : 's'}.`);
+      return;
+    }
+
+    if (subcommand === 'report') {
+      const reportText = interaction.options.getString('report');
+
+      if (!reportText) {
+        await replyEphemeral(interaction, 'Please include a report message.');
+        return;
+      }
+
+      state.alertReports.push({
+        id: `${Date.now()}-${interaction.user.id}`,
+        report: reportText.trim(),
+        userId: interaction.user.id,
+        userTag: interaction.user.tag,
+        guildId: interaction.guildId ?? null,
+        guildName: interaction.guild?.name ?? null,
+        channelId: interaction.channelId ?? null,
+        channelName: interaction.channel?.name ?? null,
+        createdAt: new Date().toISOString(),
+      });
+      await saveState(state);
+      await replyEphemeral(interaction, 'Your alert report was submitted.');
+      return;
+    }
+
+    if (subcommand === 'show') {
+      if (interaction.user.id !== GLOBAL_BOT_ADMIN_USER_ID) {
+        await replyEphemeral(interaction, 'Only the global bot admin can view alert reports.');
+        return;
+      }
+
+      if (state.alertReports.length === 0) {
+        await replyEphemeral(interaction, 'No alert reports have been submitted yet.');
+        return;
+      }
+
+      const recentReports = state.alertReports.slice(-20).reverse();
+      const reportEmbed = new EmbedBuilder()
+        .setColor(0xe67e22)
+        .setTitle('Submitted Alert Reports')
+        .setDescription(`Showing the ${recentReports.length} most recent user reports.`);
+
+      for (const report of recentReports) {
+        reportEmbed.addFields({
+          name: `${report.userTag} • ${report.createdAt}`,
+          value: [
+            report.report,
+            report.guildName ? `Server: ${report.guildName}` : 'Server: Unknown',
+            report.channelName ? `Channel: #${report.channelName}` : 'Channel: Unknown',
+          ].join('\n'),
+        });
+      }
+
+      await interaction.reply({ embeds: [reportEmbed], flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await replyEphemeral(interaction, 'Unknown alert subcommand.');
     return;
   }
 

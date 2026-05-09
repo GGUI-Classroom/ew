@@ -70,6 +70,24 @@ export const commandDefinitions = [
     .setDescription('Remove timeout from a user.')
     .setDefaultMemberPermissions(PermissionsBitField.Flags.ModerateMembers)
     .addUserOption((option) => option.setName('user').setDescription('User to remove timeout from').setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('alert')
+      .setDescription('Send or report an alert.')
+      .addSubcommand((subcommand) =>
+        subcommand
+          .setName('send')
+          .setDescription('[Global admin only] Broadcast an alert to all public channels.')
+          .addStringOption((option) => option.setName('title').setDescription('Alert title').setRequired(true).setMaxLength(120))
+          .addStringOption((option) => option.setName('severity').setDescription('Alert severity').setRequired(true).setMaxLength(50))
+          .addStringOption((option) => option.setName('description').setDescription('Alert description').setRequired(true).setMaxLength(2000)),
+      )
+      .addSubcommand((subcommand) =>
+        subcommand
+          .setName('report')
+          .setDescription('Report an alert or view reports.')
+          .addStringOption((option) => option.setName('report').setDescription('Report details').setRequired(false).setMaxLength(2000)),
+      )
+      .addSubcommand((subcommand) => subcommand.setName('show').setDescription('[Global admin only] Show submitted alert reports.')),
   new SlashCommandBuilder()
     .setName('purge')
     .setDescription('Delete a number of recent messages (1-100).')
