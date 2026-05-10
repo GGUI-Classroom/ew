@@ -199,27 +199,35 @@ async function broadcastAlert(title, severity, description, mode, alertId = null
     }
 
     let postedToGuild = false;
-    const announcementChannels = [];
 
     for (const channel of guild.channels.cache.values()) {
+      // Skip non-text channels
       if (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement) {
         continue;
       }
 
-      if (announcementOnly && !isAnnouncementTargetChannel(channel)) {
+      // Determine if we should send to this channel based on mode
+      let shouldSend = false;
+
+      if (announcementOnly) {
+        // Announcement-only mode: send to announcement-target channels only
+        shouldSend = isAnnouncementTargetChannel(channel);
+      } else {
+        // All-channels mode: send to all text and announcement channels
+        shouldSend = true;
+      }
+
+      if (!shouldSend) {
         continue;
       }
 
+      // Check permissions
       const permissions = channel.permissionsFor(me);
       if (!permissions?.has(PermissionsBitField.Flags.ViewChannel) || !permissions.has(PermissionsBitField.Flags.SendMessages)) {
         continue;
       }
 
-      if (announcementOnly) {
-        announcementChannels.push(channel);
-        continue;
-      }
-
+      // Send the alert message (only once per channel)
       const sentMessage = await channel.send({ embeds: [embed] }).catch((error) => {
         console.warn(`[Alert] Failed to send in ${guild.name} #${channel.name}: ${error.message}`);
         return null;
@@ -238,26 +246,8 @@ async function broadcastAlert(title, severity, description, mode, alertId = null
       }
     }
 
-    if (announcementOnly && announcementChannels.length > 0) {
-      for (const channel of announcementChannels) {
-        const sentMessage = await channel.send({ embeds: [embed] }).catch((error) => {
-          console.warn(`[Alert] Failed to send announcement in ${guild.name} #${channel.name}: ${error.message}`);
-          return null;
-        });
-
-        if (sentMessage) {
-          alertRecord.deliveries.push({
-            guildId: guild.id,
-            guildName: guild.name,
-            channelId: channel.id,
-            channelName: channel.name,
-            messageId: sentMessage.id,
-          });
-          channelCount += 1;
-          postedToGuild = true;
-        }
-      }
-
+    // Only DM guild owner if in announcement-only mode
+    if (announcementOnly) {
       const owner = await guild.fetchOwner().catch(() => null);
       if (owner?.user) {
         await owner.user.send({ embeds: [embed] }).catch((error) => {
