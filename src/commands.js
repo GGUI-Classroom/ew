@@ -277,6 +277,58 @@ export const commandDefinitions = [
         .addSubcommand((subcommand) => subcommand.setName('list').setDescription('[Global admin only] List all users on the auto-ban list.')),
     ),
   new SlashCommandBuilder()
+    .setName('limit')
+    .setDescription('Restrict a user to explicitly allowed channels.')
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('create')
+        .setDescription('Create or refresh a limited-access role for a user.')
+        .addUserOption((option) => option.setName('user').setDescription('The user to limit').setRequired(true)),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('config')
+        .setDescription('Choose exactly which channels a limited user can access.')
+        .addUserOption((option) => option.setName('user').setDescription('The user to configure').setRequired(true))
+        .addStringOption((option) =>
+          option
+            .setName('channels')
+            .setDescription('Comma-separated allowed channel mentions or IDs')
+            .setRequired(true)
+            .setMaxLength(4000),
+        )
+        .addStringOption((option) =>
+          option
+            .setName('access')
+            .setDescription('Access mode for the allowed channels')
+            .setRequired(false)
+            .addChoices(
+              { name: 'read-only', value: 'read' },
+              { name: 'can type', value: 'write' },
+            ),
+        ),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('status')
+        .setDescription('Show the current limited-access configuration for a user.')
+        .addUserOption((option) => option.setName('user').setDescription('The user to inspect').setRequired(true)),
+    ),
+  new SlashCommandBuilder()
+    .setName('unlimit')
+    .setDescription('Remove a user from channel limits and delete their limited-access role.')
+    .addUserOption((option) => option.setName('user').setDescription('The user to unlimit').setRequired(true)),
+  new SlashCommandBuilder()
+    .setName('prefix')
+    .setDescription('Set or view the server prefix for message commands.')
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('set')
+        .setDescription('Set the server prefix for message commands.')
+        .addStringOption((option) => option.setName('prefix').setDescription('New prefix, like ? or !').setRequired(true).setMaxLength(5)),
+    )
+    .addSubcommand((subcommand) => subcommand.setName('show').setDescription('Show the current server prefix.')),
+  new SlashCommandBuilder()
     .setName('sendmessage')
     .setDescription('Send a DM to any user.')
     .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageMessages)

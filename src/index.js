@@ -44,6 +44,8 @@ state.warnings ??= {};
 state.adminRoleIds ??= [];
 state.adminUserIds ??= [];
 state.guildAdmins ??= {};
+state.guildPrefixes ??= {};
+state.limitedAccess ??= {};
 state.dispenserLinks ??= [];
 state.dispenserLimits ??= [];
 state.dispenserUsage ??= [];
@@ -403,6 +405,217 @@ function buildLimitId() {
   return `limit-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
+function getGuildPrefix(guildId) {
+  state.guildPrefixes ??= {};
+  return state.guildPrefixes[guildId] ?? '?';
+}
+
+function setGuildPrefix(guildId, prefix) {
+  state.guildPrefixes ??= {};
+  state.guildPrefixes[guildId] = prefix;
+}
+
+function getGuildLimitedAccessConfig(guildId) {
+  state.limitedAccess ??= {};
+  state.limitedAccess[guildId] ??= {
+    users: {},
+  };
+
+  state.limitedAccess[guildId].users ??= {};
+  return state.limitedAccess[guildId];
+}
+
+function parseChannelReferenceList(raw) {
+  const matches = raw.match(/<#\d+>|\b\d{15,20}\b/g) ?? [];
+  return [...new Set(matches.map((token) => token.replace(/[<#>]/g, '')))].filter(Boolean);
+}
+
+function buildLimitedAccessOverwrite(channel, accessMode) {
+  const isVoiceChannel = channel.type === ChannelType.GuildVoice || channel.type === ChannelType.GuildStageVoice;
+
+  if (accessMode === 'write') {
+    return isVoiceChannel
+      ? {
+          ViewChannel: true,
+          Connect: true,
+          Speak: true,
+          Stream: true,
+        }
+      : {
+          ViewChannel: true,
+          ReadMessageHistory: true,
+          SendMessages: true,
+          SendMessagesInThreads: true,
+          AddReactions: true,
+        };
+  }
+
+  if (accessMode === 'read') {
+    return isVoiceChannel
+      ? {
+          ViewChannel: true,
+        }
+      : {
+          ViewChannel: true,
+          ReadMessageHistory: true,
+        };
+  }
+
+  return {
+    ViewChannel: false,
+    ReadMessageHistory: false,
+    SendMessages: false,
+    SendMessagesInThreads: false,
+    AddReactions: false,
+    Connect: false,
+    Speak: false,
+    Stream: false,
+    CreatePublicThreads: false,
+    CreatePrivateThreads: false,
+  };
+}
+
+async function syncLimitedAccessForUser(guild, userId) {
+  const guildLimitConfig = getGuildLimitedAccessConfig(guild.id);
+  const userConfig = guildLimitConfig.users[userId];
+
+  if (!userConfig) {
+    return null;
+  }
+
+  const user = await client.users.fetch(userId).catch(() => null);
+  const desiredRoleName = `Limited ${truncate(user?.username ?? userId, 80)}`;
+
+  let role = null;
+  if (userConfig.roleId) {
+    role = guild.roles.cache.get(userConfig.roleId) ?? (await guild.roles.fetch(userConfig.roleId).catch(() => null));
+  }
+
+  if (!role) {
+    role = await guild.roles.create({
+      name: desiredRoleName,
+      reason: `Limited channel access role for ${user?.tag ?? userId}`,
+    }).catch((error) => {
+      console.warn(`[Limit] Failed to create role for ${userId} in ${guild.name}: ${error.message}`);
+      return null;
+    });
+
+    if (!role) {
+      return null;
+    }
+
+    userConfig.roleId = role.id;
+  } else if (role.name !== desiredRoleName) {
+    await role.setName(desiredRoleName).catch(() => null);
+  }
+
+  const member = await guild.members.fetch(userId).catch(() => null);
+  if (member && !member.roles.cache.has(role.id)) {
+    await member.roles.add(role.id).catch((error) => {
+      console.warn(`[Limit] Failed to add role ${role.id} to ${userId} in ${guild.name}: ${error.message}`);
+    });
+  }
+
+  const allowedChannels = userConfig.allowedChannels ?? {};
+
+  for (const channel of guild.channels.cache.values()) {
+    if (channel.isThread?.()) {
+      continue;
+    }
+
+    const accessMode = allowedChannels[channel.id] ?? null;
+    const overwrite = buildLimitedAccessOverwrite(channel, accessMode);
+
+    await channel.permissionOverwrites.edit(role.id, overwrite).catch((error) => {
+      console.warn(`[Limit] Failed to update ${guild.name} #${channel.name} for role ${role.id}: ${error.message}`);
+    });
+  }
+
+  userConfig.updatedAt = new Date().toISOString();
+  userConfig.username = user?.username ?? userConfig.username ?? null;
+  await saveState(state);
+  return { role, member, userConfig };
+}
+
+async function removeLimitedAccessForUser(guild, userId) {
+  const guildLimitConfig = getGuildLimitedAccessConfig(guild.id);
+  const userConfig = guildLimitConfig.users[userId];
+
+  if (!userConfig) {
+    return false;
+  }
+
+  if (userConfig.roleId) {
+    for (const channel of guild.channels.cache.values()) {
+      if (channel.isThread?.()) {
+        continue;
+      }
+
+      await channel.permissionOverwrites.delete(userConfig.roleId).catch(() => null);
+    }
+
+    const role = guild.roles.cache.get(userConfig.roleId) ?? (await guild.roles.fetch(userConfig.roleId).catch(() => null));
+    if (role) {
+      await role.delete('Removing limited channel access role').catch(() => null);
+    }
+  }
+
+  delete guildLimitConfig.users[userId];
+  await saveState(state);
+  return true;
+}
+
+async function applyLimitedAccessToChannel(guild, channel) {
+  if (channel.isThread?.()) {
+    return;
+  }
+
+  const guildLimitConfig = state.limitedAccess?.[guild.id];
+  if (!guildLimitConfig?.users) {
+    return;
+  }
+
+  for (const [userId, userConfig] of Object.entries(guildLimitConfig.users)) {
+    if (!userConfig?.roleId) {
+      continue;
+    }
+
+    const overwrite = buildLimitedAccessOverwrite(channel, userConfig.allowedChannels?.[channel.id] ?? null);
+    await channel.permissionOverwrites.edit(userConfig.roleId, overwrite).catch((error) => {
+      console.warn(`[Limit] Failed to apply new-channel access for ${userId} in ${guild.name} #${channel.name}: ${error.message}`);
+    });
+  }
+}
+
+function resolveLimitedUserIdFromText(raw) {
+  const trimmed = raw.trim();
+  const mentionMatch = /^<@!?(\d+)>$/.exec(trimmed);
+  if (mentionMatch) {
+    return mentionMatch[1];
+  }
+
+  if (/^\d{15,20}$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  return null;
+}
+
+function summarizeAllowedChannels(guild, allowedChannels) {
+  const entries = Object.entries(allowedChannels ?? {});
+
+  if (entries.length === 0) {
+    return 'none';
+  }
+
+  return entries
+    .map(([channelId, accessMode]) => {
+      const channel = guild.channels.cache.get(channelId);
+      return `${channel ? `<#${channelId}>` : `\`${channelId}\``} (${accessMode === 'write' ? 'can type' : 'read-only'})`;
+    })
+    .join(', ');
+}
+
 function isServerAdministrator(interaction) {
   return interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator) ?? false;
 }
@@ -612,6 +825,176 @@ async function replyEphemeral(interaction, content) {
   }
 }
 
+async function createOrRefreshLimitedAccess(guild, userId) {
+  const guildLimitConfig = getGuildLimitedAccessConfig(guild.id);
+  guildLimitConfig.users[userId] ??= {
+    roleId: null,
+    allowedChannels: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  const result = await syncLimitedAccessForUser(guild, userId);
+  return result ?? guildLimitConfig.users[userId];
+}
+
+async function configureLimitedAccessChannels(guild, userId, channelIds, accessMode) {
+  const guildLimitConfig = getGuildLimitedAccessConfig(guild.id);
+  guildLimitConfig.users[userId] ??= {
+    roleId: null,
+    allowedChannels: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  guildLimitConfig.users[userId].allowedChannels = Object.fromEntries(channelIds.map((channelId) => [channelId, accessMode]));
+  guildLimitConfig.users[userId].updatedAt = new Date().toISOString();
+
+  await syncLimitedAccessForUser(guild, userId);
+  return guildLimitConfig.users[userId];
+}
+
+async function removeLimitedAccess(guild, userId) {
+  return removeLimitedAccessForUser(guild, userId);
+}
+
+async function handlePrefixLimitCommand(message, args) {
+  if (!message.guild) {
+    return false;
+  }
+
+  const [actionOrUser, ...rest] = args;
+  if (!actionOrUser) {
+    await message.reply('Usage: `limit <user>` or `limit config <user> <read|write> <channel mentions or IDs>`').catch(() => null);
+    return true;
+  }
+
+  let targetUserRaw = actionOrUser;
+  let accessMode = 'write';
+  let channelRaw = '';
+
+  if (actionOrUser.toLowerCase() === 'config') {
+    targetUserRaw = rest.shift();
+    accessMode = (rest.shift() ?? 'write').toLowerCase();
+    channelRaw = rest.join(' ');
+  }
+
+  const targetUserId = resolveLimitedUserIdFromText(targetUserRaw ?? '');
+  if (!targetUserId) {
+    await message.reply('Provide the user as a mention or user ID.').catch(() => null);
+    return true;
+  }
+
+  if (actionOrUser.toLowerCase() === 'config') {
+    if (accessMode !== 'read' && accessMode !== 'write') {
+      await message.reply('Access mode must be `read` or `write`.').catch(() => null);
+      return true;
+    }
+
+    const channelIds = parseChannelReferenceList(channelRaw);
+    if (channelIds.length === 0) {
+      await message.reply('Provide at least one allowed channel mention or ID.').catch(() => null);
+      return true;
+    }
+
+    const invalidChannelIds = channelIds.filter((channelId) => !message.guild.channels.cache.get(channelId));
+    if (invalidChannelIds.length > 0) {
+      await message.reply(`Unknown channel IDs: ${invalidChannelIds.map((id) => `\`${id}\``).join(', ')}.`).catch(() => null);
+      return true;
+    }
+
+    const userConfig = await configureLimitedAccessChannels(message.guild, targetUserId, channelIds, accessMode);
+    await message.reply(`Configured limited access for <@${targetUserId}>. Allowed channels: ${summarizeAllowedChannels(message.guild, userConfig.allowedChannels)}.`).catch(() => null);
+    return true;
+  }
+
+  await createOrRefreshLimitedAccess(message.guild, targetUserId);
+  await message.reply(`Created or refreshed limited access for <@${targetUserId}>. Use \`limit config <user> <read|write> <channels>\` to choose allowed channels.`).catch(() => null);
+  return true;
+}
+
+async function handlePrefixPrefixCommand(message, args) {
+  if (!message.guild) {
+    return false;
+  }
+
+  const subcommand = (args[0] ?? '').toLowerCase();
+  if (subcommand === 'show') {
+    await message.reply(`Current prefix: \`${getGuildPrefix(message.guild.id)}\``).catch(() => null);
+    return true;
+  }
+
+  if (subcommand !== 'set') {
+    await message.reply('Usage: `prefix set <new prefix>` or `prefix show`.').catch(() => null);
+    return true;
+  }
+
+  const newPrefix = (args.slice(1).join(' ') || '').trim();
+  if (!newPrefix || newPrefix.length > 5 || /\s/.test(newPrefix)) {
+    await message.reply('Prefix must be 1-5 characters with no spaces.').catch(() => null);
+    return true;
+  }
+
+  setGuildPrefix(message.guild.id, newPrefix);
+  await saveState(state);
+  await message.reply(`Prefix updated to \`${newPrefix}\`. Message commands now start with that prefix.`).catch(() => null);
+  return true;
+}
+
+async function handlePrefixUnlimitCommand(message, args) {
+  if (!message.guild) {
+    return false;
+  }
+
+  const targetUserId = resolveLimitedUserIdFromText(args[0] ?? '');
+  if (!targetUserId) {
+    await message.reply('Usage: `unlimit <user mention or ID>`').catch(() => null);
+    return true;
+  }
+
+  const removed = await removeLimitedAccess(message.guild, targetUserId);
+  if (!removed) {
+    await message.reply(`No limited access config was found for <@${targetUserId}>.`).catch(() => null);
+    return true;
+  }
+
+  await message.reply(`Removed limited access for <@${targetUserId}>.`).catch(() => null);
+  return true;
+}
+
+async function handlePrefixCommandMessage(message) {
+  if (!message.guild) {
+    return false;
+  }
+
+  const prefix = getGuildPrefix(message.guild.id);
+  if (!message.content.startsWith(prefix)) {
+    return false;
+  }
+
+  const rawCommand = message.content.slice(prefix.length).trim();
+  if (!rawCommand) {
+    return false;
+  }
+
+  const [commandName, ...args] = rawCommand.split(/\s+/);
+  const normalizedCommand = commandName.toLowerCase();
+
+  if (normalizedCommand === 'limit') {
+    return handlePrefixLimitCommand(message, args);
+  }
+
+  if (normalizedCommand === 'unlimit') {
+    return handlePrefixUnlimitCommand(message, args);
+  }
+
+  if (normalizedCommand === 'prefix') {
+    return handlePrefixPrefixCommand(message, args);
+  }
+
+  return false;
+}
+
 async function createRelayChannel(guild, targetUser, invoker) {
   const channelName = `relay-${targetUser.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 32);
 
@@ -755,6 +1138,9 @@ async function handleChatCommand(interaction) {
   const adminOnlyCommands = new Set([
     'admin',
     'moderationrule',
+    'limit',
+    'unlimit',
+    'prefix',
     'sendmessage',
     'say',
     'poll',
@@ -795,6 +1181,7 @@ async function handleChatCommand(interaction) {
         { name: 'General', value: '`/ping` `/about` `/help` `/serverinfo` `/userinfo` `/avatar`' },
         { name: 'Utility', value: '`/say` `/poll`' },
         { name: 'Moderation', value: '`/ban` `/kick` `/timeout` `/untimeout` `/purge` `/warn` `/warnings` `/moderationrule`' },
+        { name: 'Access Control', value: '`/limit create|config|status` `/unlimit` `/prefix set|show`' },
         { name: 'Alerts', value: '`/alert send` `/alert delete` `/alert report` `/alert report show`' },
         { name: 'DM Link', value: '`/dmconnect` `/dmend` `/dmstatus`' },
         { name: 'Reaction Roles', value: '`/reactionrole`' },
@@ -1177,6 +1564,122 @@ async function handleChatCommand(interaction) {
         ? `enabled in <#${noinviteRule.reports.channelId}>`
         : 'disabled';
       await replyEphemeral(interaction, `Invite-link moderation is **${status}**. Timeout: **${timeoutStatus}**. Reports: **${reportsStatus}**. Bypasses: ${bypasses}. Message: "${noinviteRule.warningMessage}".`);
+      return;
+    }
+  }
+
+  if (interaction.commandName === 'limit') {
+    if (!interaction.guild) {
+      await replyEphemeral(interaction, 'This command only works in a server.');
+      return;
+    }
+
+    const subcommand = interaction.options.getSubcommand(true);
+
+    if (subcommand === 'create') {
+      const targetUser = interaction.options.getUser('user', true);
+      await createOrRefreshLimitedAccess(interaction.guild, targetUser.id);
+      await replyEphemeral(interaction, `Created or refreshed limited access for ${targetUser.tag}. Use /limit config to choose allowed channels.`);
+      return;
+    }
+
+    if (subcommand === 'config') {
+      const targetUser = interaction.options.getUser('user', true);
+      const channelsRaw = interaction.options.getString('channels', true);
+      const accessMode = interaction.options.getString('access') ?? 'write';
+
+      const channelIds = parseChannelReferenceList(channelsRaw);
+      if (channelIds.length === 0) {
+        await replyEphemeral(interaction, 'Provide at least one allowed channel mention or ID.');
+        return;
+      }
+
+      const missingChannels = channelIds.filter((channelId) => !interaction.guild.channels.cache.get(channelId));
+      if (missingChannels.length > 0) {
+        await replyEphemeral(interaction, `Unknown channel IDs: ${missingChannels.map((id) => `\`${id}\``).join(', ')}.`);
+        return;
+      }
+
+      if (accessMode !== 'read' && accessMode !== 'write') {
+        await replyEphemeral(interaction, 'Access mode must be `read` or `write`.');
+        return;
+      }
+
+      const userConfig = await configureLimitedAccessChannels(interaction.guild, targetUser.id, channelIds, accessMode);
+      await replyEphemeral(interaction, `Configured limited access for ${targetUser.tag}. Allowed channels: ${summarizeAllowedChannels(interaction.guild, userConfig.allowedChannels)}.`);
+      return;
+    }
+
+    if (subcommand === 'status') {
+      const targetUser = interaction.options.getUser('user', true);
+      const guildLimitConfig = getGuildLimitedAccessConfig(interaction.guild.id);
+      const userConfig = guildLimitConfig.users[targetUser.id];
+
+      if (!userConfig) {
+        await replyEphemeral(interaction, `${targetUser.tag} does not currently have limited access configured.`);
+        return;
+      }
+
+      const role = userConfig.roleId ? interaction.guild.roles.cache.get(userConfig.roleId) ?? (await interaction.guild.roles.fetch(userConfig.roleId).catch(() => null)) : null;
+      const allowedChannels = summarizeAllowedChannels(interaction.guild, userConfig.allowedChannels);
+      const roleLine = role ? `${role} (${role.id})` : userConfig.roleId ? `\`${userConfig.roleId}\`` : 'missing';
+
+      await replyEphemeral(
+        interaction,
+        [
+          `Limited access for ${targetUser.tag}:`,
+          `Role: ${roleLine}`,
+          `Allowed channels: ${allowedChannels}`,
+          `Created: ${userConfig.createdAt ? `<t:${Math.floor(new Date(userConfig.createdAt).getTime() / 1000)}:F>` : 'unknown'}`,
+          `Updated: ${userConfig.updatedAt ? `<t:${Math.floor(new Date(userConfig.updatedAt).getTime() / 1000)}:R>` : 'unknown'}`,
+        ].join('\n'),
+      );
+      return;
+    }
+  }
+
+  if (interaction.commandName === 'unlimit') {
+    if (!interaction.guild) {
+      await replyEphemeral(interaction, 'This command only works in a server.');
+      return;
+    }
+
+    const targetUser = interaction.options.getUser('user', true);
+    const removed = await removeLimitedAccess(interaction.guild, targetUser.id);
+
+    if (!removed) {
+      await replyEphemeral(interaction, `${targetUser.tag} does not currently have limited access configured.`);
+      return;
+    }
+
+    await replyEphemeral(interaction, `Removed limited access for ${targetUser.tag}.`);
+    return;
+  }
+
+  if (interaction.commandName === 'prefix') {
+    if (!interaction.guild) {
+      await replyEphemeral(interaction, 'This command only works in a server.');
+      return;
+    }
+
+    const subcommand = interaction.options.getSubcommand(true);
+
+    if (subcommand === 'show') {
+      await replyEphemeral(interaction, `Current prefix: \`${getGuildPrefix(interaction.guildId)}\``);
+      return;
+    }
+
+    if (subcommand === 'set') {
+      const prefix = interaction.options.getString('prefix', true).trim();
+
+      if (!prefix || prefix.length > 5 || /\s/.test(prefix)) {
+        await replyEphemeral(interaction, 'Prefix must be 1-5 characters with no spaces.');
+        return;
+      }
+
+      setGuildPrefix(interaction.guildId, prefix);
+      await saveState(state);
+      await replyEphemeral(interaction, `Prefix updated to \`${prefix}\`. Use ${prefix}limit, ${prefix}unlimit, or ${prefix}prefix set.`);
       return;
     }
   }
@@ -2180,6 +2683,10 @@ client.on(Events.MessageCreate, async (message) => {
         return;
       }
 
+      if (await handlePrefixCommandMessage(message)) {
+        return;
+      }
+
       const relaySessionEntry = findRelaySessionByChannelId(message.channelId);
 
       if (!relaySessionEntry) {
@@ -2254,6 +2761,13 @@ client.on(Events.GuildMemberAdd, async (member) => {
       return;
     }
 
+    const limitConfig = state.limitedAccess?.[member.guild.id]?.users?.[member.id];
+    if (limitConfig) {
+      await syncLimitedAccessForUser(member.guild, member.id).catch((error) => {
+        console.warn(`[Limit] Failed to apply limited access on join for ${member.user.tag} in ${member.guild.name}: ${error.message}`);
+      });
+    }
+
     const guildConfig = state.autobanGuilds[member.guild.id];
     if (!guildConfig?.enabled) {
       return;
@@ -2283,7 +2797,32 @@ client.on(Events.GuildMemberAdd, async (member) => {
   }
 });
 
+client.on(Events.ChannelCreate, async (channel) => {
+  try {
+    if (!channel.guild || channel.isThread?.()) {
+      return;
+    }
+
+    await applyLimitedAccessToChannel(channel.guild, channel);
+  } catch (error) {
+    console.error('ChannelCreate handler failed:', error);
+  }
+});
+
 client.once(Events.ClientReady, (readyClient) => {
+  for (const guild of readyClient.guilds.cache.values()) {
+    const guildLimitConfig = state.limitedAccess?.[guild.id]?.users;
+    if (!guildLimitConfig) {
+      continue;
+    }
+
+    for (const userId of Object.keys(guildLimitConfig)) {
+      syncLimitedAccessForUser(guild, userId).catch((error) => {
+        console.warn(`[Limit] Failed to resync limited access for ${userId} in ${guild.name}: ${error.message}`);
+      });
+    }
+  }
+
   console.log(`Logged in as ${readyClient.user.tag}`);
   console.log(`Loaded ${commandData.length} slash commands.`);
   console.log(`Active DM connections: ${Object.keys(state.activeRelays).length}`);
