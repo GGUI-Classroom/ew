@@ -509,6 +509,25 @@ async function syncLimitedAccessForUser(guild, userId) {
     await role.setName(desiredRoleName).catch(() => null);
   }
 
+  // Ensure the limited role is positioned high enough to override other roles,
+  // but remain below the bot's highest role (the bot cannot move a role above its own top role).
+  try {
+    const me = guild.members.me ?? (await guild.members.fetchMe().catch(() => null));
+    const botTopPos = me?.roles?.highest?.position ?? null;
+
+    if (botTopPos !== null) {
+      // Target position: one below the bot's highest role so the bot keeps control.
+      const targetPos = Math.max(botTopPos - 1, 1);
+      if (role.position < targetPos) {
+        await role.setPosition(targetPos, { reason: 'Ensure limited-access role overrides other roles' }).catch((err) => {
+          console.warn(`[Limit] Could not set role position for ${role.id} in ${guild.name}: ${err.message}`);
+        });
+      }
+    }
+  } catch (err) {
+    console.warn(`[Limit] Role positioning check failed in ${guild.name}: ${err?.message || err}`);
+  }
+
   const member = await guild.members.fetch(userId).catch(() => null);
   if (member && !member.roles.cache.has(role.id)) {
     await member.roles.add(role.id).catch((error) => {
@@ -899,17 +918,26 @@ async function handlePrefixLimitCommand(message, args) {
 
     const invalidChannelIds = channelIds.filter((channelId) => !message.guild.channels.cache.get(channelId));
     if (invalidChannelIds.length > 0) {
-      await message.reply(`Unknown channel IDs: ${invalidChannelIds.map((id) => `\`${id}\``).join(', ')}.`).catch(() => null);
+      const text = `Unknown channel IDs: ${invalidChannelIds.map((id) => `\`${id}\``).join(', ')}.`;
+      await message.reply(text).catch(async () => {
+        await message.author.send(text).catch(() => null);
+      });
       return true;
     }
 
     const userConfig = await configureLimitedAccessChannels(message.guild, targetUserId, channelIds, accessMode);
-    await message.reply(`Configured limited access for <@${targetUserId}>. Allowed channels: ${summarizeAllowedChannels(message.guild, userConfig.allowedChannels)}.`).catch(() => null);
+    const successText = `Configured limited access for <@${targetUserId}>. Allowed channels: ${summarizeAllowedChannels(message.guild, userConfig.allowedChannels)}.`;
+    await message.reply(successText).catch(async () => {
+      await message.author.send(successText).catch(() => null);
+    });
     return true;
   }
 
   await createOrRefreshLimitedAccess(message.guild, targetUserId);
-  await message.reply(`Created or refreshed limited access for <@${targetUserId}>. Use \`limit config <user> <read|write> <channels>\` to choose allowed channels.`).catch(() => null);
+  const createdText = `Created or refreshed limited access for <@${targetUserId}>. Use \`limit config <user> <read|write> <channels>\` to choose allowed channels.`;
+  await message.reply(createdText).catch(async () => {
+    await message.author.send(createdText).catch(() => null);
+  });
   return true;
 }
 
@@ -920,7 +948,10 @@ async function handlePrefixPrefixCommand(message, args) {
 
   const subcommand = (args[0] ?? '').toLowerCase();
   if (subcommand === 'show') {
-    await message.reply(`Current prefix: \`${getGuildPrefix(message.guild.id)}\``).catch(() => null);
+    const text = `Current prefix: \`${getGuildPrefix(message.guild.id)}\``;
+    await message.reply(text).catch(async () => {
+      await message.author.send(text).catch(() => null);
+    });
     return true;
   }
 
@@ -937,7 +968,10 @@ async function handlePrefixPrefixCommand(message, args) {
 
   setGuildPrefix(message.guild.id, newPrefix);
   await saveState(state);
-  await message.reply(`Prefix updated to \`${newPrefix}\`. Message commands now start with that prefix.`).catch(() => null);
+  const text = `Prefix updated to \`${newPrefix}\`. Message commands now start with that prefix.`;
+  await message.reply(text).catch(async () => {
+    await message.author.send(text).catch(() => null);
+  });
   return true;
 }
 
